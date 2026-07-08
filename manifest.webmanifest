@@ -1,0 +1,16 @@
+{
+  "name": "STARK50 — Hälsa & styrka efter 50",
+  "short_name": "STARK50",
+  "description": "Träning, mat, sömn och återhämtning byggt för män 50+. Viktnedgång och kroppssammansättning med modern forskning.",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#121614",
+  "theme_color": "#181d1a",
+  "categories": ["health", "fitness", "lifestyle"],
+  "lang": "sv-SE",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

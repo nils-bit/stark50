@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>STARK50 — Hälsa & styrka efter 50</title>
+<meta name="description" content="Träning, mat, sömn och återhämtning byggt för män 50+. Viktnedgång och kroppssammansättning med modern forskning.">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#181d1a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="STARK50">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700;9..144,900&family=Karla:wght@400;500;600;700&family=Spline+Sans+Mono:wght@500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- ══════════════ ONBOARDING ══════════════ -->
+<div id="onboarding" class="onboarding hidden">
+  <div class="ob-grain"></div>
+  <div class="ob-inner" id="obInner"></div>
+</div>
+
+<!-- ══════════════ HUVUDAPP ══════════════ -->
+<div id="app" class="app hidden">
+  <aside class="sidebar">
+    <div class="brand">STARK<span>50</span></div>
+    <nav class="nav" id="nav">
+      <button class="nav-btn active" data-view="idag"><span class="nav-ico">◉</span>Idag</button>
+      <button class="nav-btn" data-view="mat"><span class="nav-ico">✦</span>Mat</button>
+      <button class="nav-btn" data-view="traning"><span class="nav-ico">▲</span>Träning</button>
+      <button class="nav-btn" data-view="recept"><span class="nav-ico">❖</span>Recept</button>
+      <button class="nav-btn" data-view="sinne"><span class="nav-ico">◐</span>Sinne</button>
+      <button class="nav-btn" data-view="mal"><span class="nav-ico">◎</span>Mål</button>
+    </nav>
+    <button class="nav-btn nav-settings" data-view="installningar"><span class="nav-ico">⚙</span>Inställningar</button>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div>
+        <div class="topbar-date" id="topbarDate"></div>
+        <h1 class="topbar-title" id="topbarTitle">Idag</h1>
+      </div>
+      <div class="topbar-user" id="topbarUser"></div>
+    </header>
+    <div class="view-wrap" id="viewWrap"></div>
+  </main>
+</div>
+
+<!-- Toast-container för påminnelser -->
+<div class="toasts" id="toasts"></div>
+
+<!-- Modal -->
+<div class="modal-backdrop hidden" id="modalBackdrop">
+  <div class="modal" id="modal"></div>
+</div>
+
+<script src="app.js"></script>
+<script>
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+  }
+</script>
+</body>
+</html>
