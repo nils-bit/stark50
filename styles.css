@@ -440,9 +440,75 @@ label { display: block; font-size: .82rem; font-weight: 700; text-transform: upp
   50% { box-shadow: 0 0 14px rgba(224,138,60,.25); }
 }
 
-/* Mjukare kort-hovring överlag för mer premium-känsla */
-.card { transition: border-color .2s, transform .2s; }
-.grid-2 > .card:hover, .grid-3 > .card:hover { border-color: rgba(224,138,60,.28); }
+/* ═══════════════ PREMIUM-POLISH ═══════════════ */
+
+/* Kort: skiktad skugga + ljuskant upptill — känns som fysiska ytor */
+.card {
+  transition: border-color .25s ease, transform .25s ease, box-shadow .25s ease;
+  box-shadow: 0 1px 0 rgba(240,234,221,.04) inset, 0 10px 30px -18px rgba(0,0,0,.55);
+}
+.grid-2 > .card:hover, .grid-3 > .card:hover {
+  border-color: rgba(224,138,60,.28);
+  transform: translateY(-2px);
+  box-shadow: 0 1px 0 rgba(240,234,221,.05) inset, 0 18px 42px -18px rgba(0,0,0,.65);
+}
+
+/* Staggered intro: korten glider in ett i taget vid vybyte */
+.view-wrap > * { animation: fadeUp .45s cubic-bezier(.2,.7,.3,1) both; }
+.view-wrap > *:nth-child(1) { animation-delay: .02s; }
+.view-wrap > *:nth-child(2) { animation-delay: .07s; }
+.view-wrap > *:nth-child(3) { animation-delay: .12s; }
+.view-wrap > *:nth-child(4) { animation-delay: .17s; }
+.view-wrap > *:nth-child(5) { animation-delay: .22s; }
+.view-wrap > *:nth-child(6) { animation-delay: .27s; }
+.view-wrap > *:nth-child(n+7) { animation-delay: .32s; }
+.grid-2 > .card, .grid-3 > .card { animation: fadeUp .5s cubic-bezier(.2,.7,.3,1) both; }
+.grid-2 > .card:nth-child(1), .grid-3 > .card:nth-child(1) { animation-delay: .06s; }
+.grid-2 > .card:nth-child(2), .grid-3 > .card:nth-child(2) { animation-delay: .12s; }
+.grid-2 > .card:nth-child(3), .grid-3 > .card:nth-child(3) { animation-delay: .18s; }
+.grid-2 > .card:nth-child(4), .grid-3 > .card:nth-child(4) { animation-delay: .24s; }
+
+/* Knappar: glansig topp + tryckkänsla */
+.btn {
+  background-image: linear-gradient(180deg, rgba(255,255,255,.16), rgba(255,255,255,0) 45%);
+  background-color: var(--amber);
+}
+.btn.ghost, .btn.sage { background-image: none; }
+.btn.sage { background-color: var(--sage); }
+.btn:active { transform: translateY(1px) scale(.99); }
+
+/* Siffror: tabulära så staplar och stats inte hoppar */
+.big-num, .pbar-meta, .recipe-meta, .mi-macro, .h-date, .gauge-num { font-variant-numeric: tabular-nums; }
+
+/* Progressbar: rundare + diskret glöd på fylld del */
+.pbar { height: 10px; border-radius: 6px; }
+.pbar > div { box-shadow: 0 0 10px -2px rgba(224,138,60,.5); }
+.pbar > div.sage-f { box-shadow: 0 0 10px -2px rgba(147,172,143,.5); }
+.pbar > div.sky-f { box-shadow: 0 0 10px -2px rgba(127,168,184,.5); }
+.pbar > div.over { box-shadow: 0 0 10px -2px rgba(201,107,82,.5); }
+
+/* Dagsform-gauge */
+.dagsform-card { background: linear-gradient(135deg, rgba(224,138,60,.07), var(--panel) 55%); }
+.gauge-wrap { position: relative; width: 140px; flex-shrink: 0; }
+.gauge-fill { transition: stroke-dashoffset 1s cubic-bezier(.3,.8,.3,1); }
+.gauge-center { position: absolute; inset: 0; top: 22px; display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: none; }
+.gauge-num { font-family: var(--font-display); font-weight: 900; font-size: 2.1rem; line-height: 1; letter-spacing: -.02em; }
+.gauge-sub { font-family: var(--font-mono); font-size: .64rem; color: var(--cream-faint); text-transform: uppercase; letter-spacing: .15em; margin-top: .2rem; }
+
+/* Modal med fjädring */
+.modal { animation: modalIn .3s cubic-bezier(.2,.9,.3,1.15) both; }
+@keyframes modalIn { from { opacity: 0; transform: translateY(16px) scale(.97); } to { opacity: 1; transform: none; } }
+
+/* Lugnare upplevelse för den som bett om det */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-delay: 0s !important; transition-duration: .01ms !important; }
+}
+
+/* Standalone (installerad på hemskärm): stillsam överscroll + dold rullist */
+@media (display-mode: standalone) {
+  body { overscroll-behavior-y: none; }
+  ::-webkit-scrollbar { width: 0; }
+}
 
 a { color: var(--amber); }
 

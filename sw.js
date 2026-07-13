@@ -1,5 +1,5 @@
 /* STARK50 service worker — enkel offline-cache */
-const CACHE = "stark50-v1";
+const CACHE = "stark50-v2";
 const ASSETS = ["./", "./index.html", "./styles.css", "./app.js", "./manifest.webmanifest"];
 
 self.addEventListener("install", e => {

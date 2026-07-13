@@ -224,6 +224,7 @@ function defaultState() {
     logs: { meals: {}, walks: [], sessions: [], sleep: [], stress: [], weight: [], water: {} },
     progress: {},        // progressive overload: { "Övning": { weight, full } }
     mealPlan: null,      // { monday, roll, ids[7] }
+    dayPlan: null,       // dagens slumpade matsedel { date, seed, items }
     shopping: [],        // [{ t, done }]
     devices: [],         // anslutna enhets-id:n
     deviceData: {},      // { "YYYY-MM-DD": { steps, rhr, sleep } }
@@ -354,6 +355,100 @@ function weightTrend() {
     etaWeeks = Math.abs((lastE.kg - tw) / perWeek);
   }
   return { avg7: Math.round(avg7 * 10) / 10, perWeek: Math.round(perWeek * 100) / 100, etaWeeks };
+}
+
+/* ─────────────── DAGSFORM ───────────────
+   Sammanvägd readiness 0–100 av sömn, vilopuls, stress,
+   träningsbelastning och rörelse. Har du synkat Ouras egen
+   readiness-score vägs den in med halva vikten. */
+function rhrBaseline() {
+  const vals = [];
+  for (let i = 2; i <= 21; i++) {
+    const d = new Date(); d.setDate(d.getDate() - i);
+    const dd = state.deviceData[dkey(d)];
+    if (dd && dd.rhr) vals.push(dd.rhr);
+  }
+  if (vals.length < 4) return null;
+  vals.sort((a, b) => a - b);
+  return vals[Math.floor(vals.length / 2)]; // median
+}
+
+function computeDagsform() {
+  const today = dkey();
+  const yd = new Date(); yd.setDate(yd.getDate() - 1);
+  const ydKey = dkey(yd);
+  const dd = state.deviceData[today] || {};
+  const ddY = state.deviceData[ydKey] || {};
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+  const factors = [];
+
+  // 1. Sömn (35 %) — enhet eller manuell logg
+  const sleepLog = state.logs.sleep.find(s => s.date === today);
+  const sleepH = dd.sleep != null ? dd.sleep : (sleepLog ? sleepLog.hours : null);
+  factors.push({
+    name: "Sömn i natt", w: 35,
+    score: sleepH != null ? Math.round(clamp((sleepH - 4.5) / 3 * 100, 15, 100)) : 70,
+    detail: sleepH != null ? String(sleepH).replace(".", ",") + " tim" : "ingen data",
+    hasData: sleepH != null,
+  });
+
+  // 2. Vilopuls mot din baslinje (25 %)
+  const base = rhrBaseline();
+  const rhr = dd.rhr != null ? dd.rhr : ddY.rhr;
+  let rhrScore = 72, rhrDetail = "ingen data";
+  if (rhr != null && base) {
+    const diff = rhr - base;
+    rhrScore = Math.round(clamp(100 - diff * 9, 25, 100));
+    rhrDetail = rhr + " (baslinje " + base + ")";
+  } else if (rhr != null) { rhrScore = 78; rhrDetail = rhr + " — samlar baslinje"; }
+  factors.push({ name: "Vilopuls", w: 25, score: rhrScore, detail: rhrDetail, hasData: rhr != null });
+
+  // 3. Stress (15 %) — senaste loggade nivån (idag eller igår)
+  const stress = state.logs.stress.find(s => s.date === today) || state.logs.stress.find(s => s.date === ydKey);
+  factors.push({
+    name: "Stress", w: 15,
+    score: stress ? 100 - (stress.level - 1) * 19 : 70,
+    detail: stress ? ["Lugn", "Bra", "Spänd", "Stressad", "Pressad"][stress.level - 1] : "ingen data",
+    hasData: !!stress,
+  });
+
+  // 4. Träningsbelastning (15 %) — vila mellan passen är en del av träningen
+  const recent = state.logs.sessions.filter(s => {
+    const days = (fromKey(today) - fromKey(s.date)) / 86400000;
+    return days >= 0 && days <= 2;
+  }).length;
+  factors.push({
+    name: "Återhämtning", w: 15,
+    score: recent === 0 ? 95 : recent === 1 ? 78 : 58,
+    detail: recent === 0 ? "utvilad" : recent + " pass senaste 2 dagarna",
+    hasData: true,
+  });
+
+  // 5. Rörelse igår (10 %)
+  const stepsY = ddY.steps;
+  const walkedY = state.logs.walks.some(w => w.date === ydKey);
+  factors.push({
+    name: "Rörelse igår", w: 10,
+    score: stepsY != null ? Math.round(clamp(stepsY / (state.targets.steps || 8000) * 100, 30, 100)) : (walkedY ? 85 : 65),
+    detail: stepsY != null ? stepsY.toLocaleString("sv-SE") + " steg" : (walkedY ? "promenad loggad" : "ingen data"),
+    hasData: stepsY != null || walkedY,
+  });
+
+  let score = Math.round(factors.reduce((a, f) => a + f.score * f.w, 0) / 100);
+  let ouraBlend = false;
+  if (dd.readiness != null) { score = Math.round(score * 0.5 + dd.readiness * 0.5); ouraBlend = true; }
+
+  const level = score >= 80 ? { label: "Toppform", ico: "▲", color: "var(--sage)", css: "sage",
+      rec: "Grönt ljus — kör dagens pass med full kraft och sikta på att öka vikterna." }
+    : score >= 60 ? { label: "Bra läge", ico: "◆", color: "var(--amber-soft)", css: "amber",
+      rec: "Kör som planerat. Lyssna på kroppen i uppvärmningen och skala därefter." }
+    : score >= 40 ? { label: "Ta det lugnare", ico: "◐", color: "var(--amber)", css: "amber",
+      rec: "Sänk intensiteten idag — ett lättare pass eller en rask promenad räcker gott." }
+    : { label: "Vila & ladda om", ico: "●", color: "var(--clay)", css: "clay",
+      rec: "Kroppen ber om vila. Ta en lugn promenad, ät ordentligt med protein och prioritera sömnen ikväll." };
+
+  const hasAnyData = factors.some(f => f.hasData);
+  return { score, factors, ouraBlend, hasAnyData, ...level };
 }
 
 /* Streak: dagar i rad med någon loggning (mat, pass, promenad, sömn eller vikt) */
@@ -632,6 +727,114 @@ function openEatSuggestion() {
     switchView(currentView);
   });
   $$("[data-r]").forEach(b => b.onclick = () => openRecipe(findRecipe(b.dataset.r)));
+}
+
+/* ─────────────── DAGSPLAN: slumpa frukost + lunch + middag + mellanmål ───────────────
+   Träffar dags-kcal inom ±8 % och prioriterar protein. */
+function buildDayPlan(seed) {
+  const rnd = makeRng(seed);
+  const t = state.targets;
+  const okFoods = FOODS.filter(foodOk);
+  const rp = allowedRecipes();
+  const pickR = arr => arr[Math.floor(rnd() * arr.length)];
+
+  const breakfastPool = [
+    ...okFoods.filter(f => f.c === "frukost").map(f => ({ name: f.n, kcal: f.kcal, p: f.p })),
+    ...rp.filter(r => r.tags.includes("frukost")).map(r => ({ name: r.name, kcal: r.kcal, p: r.p, rid: r.id })),
+  ];
+  const lunchPool = [
+    ...rp.filter(r => !r.tags.includes("frukost") && (r.tags.includes("snabb") || r.tags.includes("matlåda") || r.tags.includes("vardag"))).map(r => ({ name: r.name, kcal: r.kcal, p: r.p, rid: r.id })),
+    ...okFoods.filter(f => f.c === "lunch").map(f => ({ name: f.n, kcal: f.kcal, p: f.p })),
+  ];
+  const dinnerPool = rp.filter(r => !r.tags.includes("frukost")).map(r => ({ name: r.name, kcal: r.kcal, p: r.p, rid: r.id }));
+  const snackPool = okFoods.filter(f => f.c === "mellanmål" && f.kcal < 250);
+
+  const planned = todaysPlannedDinner();
+  const items = [
+    { meal: "frukost", ...pickR(breakfastPool) },
+    { meal: "lunch", ...pickR(lunchPool) },
+    { meal: "middag", ...(rnd() < 0.6 && planned ? { name: planned.name, kcal: planned.kcal, p: planned.p, rid: planned.id } : pickR(dinnerPool)) },
+  ];
+
+  // Fyll upp mot kalorimålet med mellanmål — proteinrika först om proteingap finns
+  let sum = () => items.reduce((a, x) => a + x.kcal, 0);
+  let psum = () => items.reduce((a, x) => a + x.p, 0);
+  let guard = 0;
+  while (sum() < t.kcal * 0.92 && guard++ < 3) {
+    const gap = t.kcal - sum();
+    const needP = psum() < t.protein * 0.9;
+    const pool = snackPool
+      .filter(f => f.kcal <= gap + 80 && !items.some(x => x.name === f.n))
+      .sort((a, b) => needP ? (b.p / b.kcal) - (a.p / a.kcal) : Math.abs(gap - a.kcal) - Math.abs(gap - b.kcal));
+    const pick = pool[Math.floor(rnd() * Math.min(3, pool.length))];
+    if (!pick) break;
+    items.push({ meal: "mellanmål", name: pick.n, kcal: pick.kcal, p: pick.p });
+  }
+  return { date: dkey(), seed, items };
+}
+
+function openDayPlan(seed) {
+  // Återanvänd dagens sparade plan om ingen ny slump begärts
+  if (seed == null && state.dayPlan && state.dayPlan.date === dkey() && state.dayPlan.items) {
+    return renderDayPlanModal(state.dayPlan);
+  }
+  const plan = buildDayPlan(seed != null ? seed : Math.floor(Math.random() * 1e9));
+  renderDayPlanModal(plan);
+}
+
+function renderDayPlanModal(plan) {
+  const t = state.targets;
+  state.dayPlan = plan; save();
+  const kcal = plan.items.reduce((a, x) => a + x.kcal, 0);
+  const prot = plan.items.reduce((a, x) => a + x.p, 0);
+  const ICONS = { frukost: "☀", lunch: "✦", middag: "◉", mellanmål: "·" };
+
+  openModal(`
+    <div class="card-kicker">🎲 Dagens matsedel · slumpad mot dina mål</div>
+    <h2>Så här äter du idag</h2>
+    <p class="sub" style="margin:.4rem 0 1.1rem">
+      Totalt <b style="color:var(--amber-soft)">${kcal} kcal</b> (mål ${t.kcal}) och
+      <b style="color:var(--amber-soft)">${prot} g protein</b> (mål ${t.protein}) — anpassat efter dina preferenser.</p>
+    ${plan.items.map((s, i) => `
+      <div class="meal-item" style="margin-bottom:.5rem">
+        <span><b style="text-transform:capitalize;font-family:var(--font-display)">${ICONS[s.meal] || ""} ${s.meal}</b><br>
+          ${esc(s.name)}${s.rid ? ` <button class="link-btn" data-r="${s.rid}">recept</button>` : ""}</span>
+        <span style="display:flex;gap:.7rem;align-items:center">
+          <span class="mi-macro">${s.kcal} kcal · ${s.p} g</span>
+          <button class="btn small ghost" data-re="${i}" title="Slumpa om denna">🎲</button>
+          <button class="btn small" data-log="${i}">+ Logga</button>
+        </span>
+      </div>`).join("")}
+    <div class="ob-nav" style="margin-top:1.2rem;flex-wrap:wrap">
+      <button class="btn" id="dpLogAll">Logga hela dagen ✓</button>
+      <button class="btn ghost" id="dpReroll">🎲 Slumpa om allt</button>
+    </div>`);
+
+  const logItem = s => {
+    const today = dkey();
+    if (!state.logs.meals[today]) state.logs.meals[today] = [];
+    state.logs.meals[today].push({ name: s.name, kcal: s.kcal, p: s.p, meal: s.meal });
+  };
+  $$("[data-log]").forEach(b => b.onclick = () => {
+    logItem(plan.items[+b.dataset.log]); save(); closeModal();
+    toast("✦", "Loggad", plan.items[+b.dataset.log].name + " tillagd.");
+    switchView(currentView);
+  });
+  $$("[data-re]").forEach(b => b.onclick = () => {
+    // Slumpa om bara denna rad — övriga behålls
+    const i = +b.dataset.re;
+    const fresh = buildDayPlan(Math.floor(Math.random() * 1e9));
+    const repl = fresh.items.find(x => x.meal === plan.items[i].meal && x.name !== plan.items[i].name) || fresh.items[Math.min(i, fresh.items.length - 1)];
+    plan.items[i] = repl;
+    renderDayPlanModal(plan);
+  });
+  $$("[data-r]").forEach(b => b.onclick = () => openRecipe(findRecipe(b.dataset.r)));
+  $("#dpLogAll").onclick = () => {
+    plan.items.forEach(logItem); save(); closeModal();
+    toast("✦", "Hela dagen loggad", plan.items.length + " måltider · " + kcal + " kcal · " + prot + " g protein.");
+    switchView(currentView);
+  };
+  $("#dpReroll").onclick = () => openDayPlan(Math.floor(Math.random() * 1e9));
 }
 
 /* ─────────────── TOASTS & NOTISER ─────────────── */
@@ -1195,10 +1398,45 @@ function renderIdag(wrap) {
   const R = 52, CIRC = 2 * Math.PI * R;
 
   const streak = currentStreak();
+  const df = computeDagsform();
+  // Halvcirkel-gauge: 0–100 över 180°
+  const GR = 54, GC = Math.PI * GR; // halv omkrets
+  const gaugeOff = GC * (1 - df.score / 100);
+
   wrap.innerHTML = `
     <div style="display:flex;align-items:baseline;gap:1rem;flex-wrap:wrap;margin-bottom:1.4rem">
       <h2 style="font-size:1.9rem">${greet}, ${esc(state.profile.name)}.</h2>
       ${streak >= 2 ? `<span class="streak-badge">🔥 ${streak} dagar i rad</span>` : ""}
+    </div>
+
+    <div class="card dagsform-card" style="margin-bottom:1.2rem">
+      <div style="display:flex;align-items:center;gap:1.6rem;flex-wrap:wrap">
+        <div class="gauge-wrap">
+          <svg width="140" height="84" viewBox="0 0 140 84">
+            <path d="M 16 76 A ${GR} ${GR} 0 0 1 124 76" fill="none" stroke="var(--bg-deep)" stroke-width="11" stroke-linecap="round"/>
+            <path d="M 16 76 A ${GR} ${GR} 0 0 1 124 76" fill="none" stroke="${df.color}" stroke-width="11" stroke-linecap="round"
+              stroke-dasharray="${GC.toFixed(1)}" stroke-dashoffset="${gaugeOff.toFixed(1)}" class="gauge-fill"/>
+          </svg>
+          <div class="gauge-center">
+            <div class="gauge-num">${df.hasAnyData ? df.score : "–"}</div>
+            <div class="gauge-sub">av 100</div>
+          </div>
+        </div>
+        <div style="flex:1;min-width:220px">
+          <div class="card-kicker">Dagsform${df.ouraBlend ? " · vägd med Oura readiness" : ""}</div>
+          ${df.hasAnyData ? `
+            <h2 style="color:${df.color}">${df.ico} ${df.label}</h2>
+            <p class="sub">${df.rec}</p>
+          ` : `
+            <h2>Ingen data ännu</h2>
+            <p class="sub">Synka din ring eller klocka (steg, vilopuls, sömn — och Ouras readiness om du har den) eller logga sömn & stress, så räknar appen ut din dagsform.</p>
+          `}
+          <div style="display:flex;gap:.6rem;margin-top:.8rem;flex-wrap:wrap">
+            <button class="btn ghost small" id="dfDetail">Så räknas den</button>
+            <button class="btn ghost small" id="dfSync">↻ Synka enheter</button>
+          </div>
+        </div>
+      </div>
     </div>
 
     ${walksToday.length < t.walksPerDay ? `
@@ -1296,7 +1534,7 @@ function renderIdag(wrap) {
         <p class="sub">${esc(dayRecipe.desc)} · <b style="color:var(--amber-soft)">${dayRecipe.kcal} kcal · ${dayRecipe.p} g protein</b></p>
       </div>
       <div style="display:flex;gap:.6rem;flex-wrap:wrap">
-        <button class="btn small" id="eatSugg">✦ Vad ska jag äta idag?</button>
+        <button class="btn small" id="eatSugg">🎲 Slumpa dagens matsedel</button>
         <button class="btn ghost small" id="openDayRecipe">Visa recept</button>
         <button class="btn ghost small" id="goRecept">Matsedel & inköpslista</button>
       </div>
@@ -1307,7 +1545,9 @@ function renderIdag(wrap) {
   $("#goSinne").onclick = () => switchView("sinne");
   $("#goRecept").onclick = () => switchView("recept");
   $("#openDayRecipe").onclick = () => openRecipe(dayRecipe);
-  $("#eatSugg").onclick = openEatSuggestion;
+  $("#eatSugg").onclick = () => openDayPlan();
+  $("#dfDetail").onclick = openDagsformDetail;
+  $("#dfSync").onclick = openDeviceSync;
   const sync = $("#syncDev");
   if (sync) sync.onclick = openDeviceSync;
   if (nextWk) { const b = $("#startWkBtn"); if (b) b.onclick = () => startSession(nextWk.id); }
@@ -1343,30 +1583,50 @@ function openWalkLogger() {
   };
 }
 
-/* Synka enhetsdata manuellt (steg, vilopuls, sömn) */
+/* Synka enhetsdata manuellt (steg, vilopuls, sömn, Oura readiness) */
 function openDeviceSync() {
   const today = dkey();
   const dd = state.deviceData[today] || {};
   const devNames = state.devices.map(id => (DEVICES.find(x => x.id === id) || {}).name).filter(Boolean).join(", ");
+  const hasOura = state.devices.includes("oura");
   openModal(`
     <h2>Synka dagens värden</h2>
-    <p class="sub" style="margin:.4rem 0 1.2rem">Öppna ${esc(devNames || "din hälsoapp")} och skriv av dagens siffror — det tar tio sekunder.</p>
+    <p class="sub" style="margin:.4rem 0 1.2rem">Öppna ${esc(devNames || "din hälsoapp")} och skriv av dagens siffror — det tar tio sekunder. Oura tillåter tyvärr inte automatisk hämtning från webbappar.</p>
     <div class="ob-grid">
       <div><label>Steg idag</label><input id="dvSteps" type="number" min="0" value="${dd.steps != null ? dd.steps : ""}" placeholder="8 500"></div>
       <div><label>Vilopuls (slag/min)</label><input id="dvRhr" type="number" min="30" max="120" value="${dd.rhr != null ? dd.rhr : ""}" placeholder="58"></div>
       <div><label>Sömn i natt (timmar)</label><input id="dvSleep" type="number" step="0.1" min="0" max="14" value="${dd.sleep != null ? dd.sleep : ""}" placeholder="7,5"></div>
+      ${hasOura ? `<div><label>Oura readiness (0–100)</label><input id="dvReadiness" type="number" min="0" max="100" value="${dd.readiness != null ? dd.readiness : ""}" placeholder="82"></div>` : ""}
     </div>
     <div class="ob-nav"><button class="btn" id="dvSave">Spara värden</button></div>`);
   $("#dvSave").onclick = () => {
-    const steps = $("#dvSteps").value === "" ? null : +$("#dvSteps").value;
-    const rhr = $("#dvRhr").value === "" ? null : +$("#dvRhr").value;
-    const sleep = $("#dvSleep").value === "" ? null : +String($("#dvSleep").value).replace(",", ".");
-    state.deviceData[today] = { steps, rhr, sleep };
+    const num = id => { const el = $(id); return el && el.value !== "" ? +String(el.value).replace(",", ".") : null; };
+    const steps = num("#dvSteps"), rhr = num("#dvRhr"), sleep = num("#dvSleep"), readiness = num("#dvReadiness");
+    state.deviceData[today] = { steps, rhr, sleep, readiness };
     if (sleep && !state.logs.sleep.find(s => s.date === today)) state.logs.sleep.push({ date: today, hours: sleep });
     save(); closeModal();
-    toast("⌚", "Enhetsdata sparad", (steps != null ? steps.toLocaleString("sv-SE") + " steg" : "Värden") + " inlagda för idag.");
+    toast("⌚", "Enhetsdata sparad", "Dagsformen är uppdaterad med dina nya värden.");
     switchView(currentView);
   };
+}
+
+/* Dagsform — detaljvy med faktorer */
+function openDagsformDetail() {
+  const df = computeDagsform();
+  openModal(`
+    <div class="card-kicker">Dagsform · ${df.score} av 100</div>
+    <h2 style="color:${df.color}">${df.ico} ${df.label}</h2>
+    <p class="sub" style="margin:.4rem 0 1.3rem">${df.rec}</p>
+    ${df.factors.map(f => `
+      <div style="margin-bottom:1rem">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:1rem">
+          <span style="font-weight:700">${f.name} <span style="font-family:var(--font-mono);font-size:.72rem;color:var(--cream-faint)">${f.w} %</span></span>
+          <span class="mi-macro">${esc(f.detail)}</span>
+        </div>
+        <div class="pbar" style="margin-top:.35rem"><div class="${f.score >= 75 ? "sage-f" : f.score >= 50 ? "" : "over"}" style="width:${f.score}%"></div></div>
+      </div>`).join("")}
+    ${df.ouraBlend ? `<p class="sub" style="font-size:.85rem;margin-top:.4rem">Slutpoängen är ett snitt av faktorerna ovan (50 %) och din Oura readiness (50 %).</p>` : ""}
+    <p class="sub" style="font-size:.85rem;margin-top:.6rem">Faktorer utan data räknas neutralt — ju mer du synkar och loggar, desto träffsäkrare blir dagsformen.</p>`);
 }
 
 /* ═══════════════ VY: MAT ═══════════════ */
@@ -1381,7 +1641,7 @@ function renderMat(wrap) {
   wrap.innerHTML = `
     <div class="date-nav">
       <button id="dPrev">←</button><h2>${prettyDate(matDate)}</h2><button id="dNext" ${matDate === dkey() ? "disabled style='opacity:.3'" : ""}>→</button>
-      <button class="btn small" id="eatSugg2" style="margin-left:auto">✦ Vad ska jag äta idag?</button>
+      <button class="btn small" id="eatSugg2" style="margin-left:auto">🎲 Vad ska jag äta idag?</button>
     </div>
     <div class="grid-2" style="margin-bottom:1.6rem">
       <div class="card"><div class="card-kicker">Kalorier</div>${pbar(tot.kcal, t.kcal)}</div>
@@ -1410,7 +1670,7 @@ function renderMat(wrap) {
       </div>`;
     }).join("")}`;
 
-  $("#eatSugg2").onclick = openEatSuggestion;
+  $("#eatSugg2").onclick = () => openDayPlan();
   $("#dPrev").onclick = () => { const d = fromKey(matDate); d.setDate(d.getDate() - 1); matDate = dkey(d); renderMat(wrap); };
   $("#dNext").onclick = () => { const d = fromKey(matDate); d.setDate(d.getDate() + 1); if (dkey(d) <= dkey()) { matDate = dkey(d); renderMat(wrap); } };
   $$("[data-add]").forEach(b => b.onclick = () => openFoodPicker(b.dataset.add, () => renderMat(wrap)));
