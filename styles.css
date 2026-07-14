@@ -495,6 +495,23 @@ label { display: block; font-size: .82rem; font-weight: 700; text-transform: upp
 .gauge-num { font-family: var(--font-display); font-weight: 900; font-size: 2.1rem; line-height: 1; letter-spacing: -.02em; }
 .gauge-sub { font-family: var(--font-mono); font-size: .64rem; color: var(--cream-faint); text-transform: uppercase; letter-spacing: .15em; margin-top: .2rem; }
 
+/* Dagsform-historik: 14 tunna staplar med statusfärg */
+.df-bars { display: flex; gap: 5px; align-items: flex-end; flex: 1; min-width: 240px; max-width: 420px; }
+.df-col { display: flex; flex-direction: column; align-items: center; gap: .3rem; flex: 1; }
+.df-bar-track {
+  height: 74px; width: 100%; max-width: 18px;
+  background: var(--bg-deep); border-radius: 4px;
+  display: flex; align-items: flex-end; overflow: hidden;
+}
+.df-bar { width: 100%; border-radius: 4px 4px 0 0; transition: height .6s cubic-bezier(.3,.8,.3,1); min-height: 0; }
+.df-lbl { font-family: var(--font-mono); font-size: .62rem; color: var(--cream-faint); }
+.df-lbl.today { color: var(--amber); font-weight: 700; }
+
+/* Matsedelns frukost/lunch-underrader */
+.plan-sub { font-size: .82rem; color: var(--cream-dim); line-height: 1.7; }
+.plan-sub-link { font-size: .82rem; color: var(--cream-dim); text-decoration-color: var(--line); }
+.plan-sub-link:hover { color: var(--amber-soft); }
+
 /* Modal med fjädring */
 .modal { animation: modalIn .3s cubic-bezier(.2,.9,.3,1.15) both; }
 @keyframes modalIn { from { opacity: 0; transform: translateY(16px) scale(.97); } to { opacity: 1; transform: none; } }

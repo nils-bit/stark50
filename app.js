@@ -223,8 +223,9 @@ function defaultState() {
     reminders: { walks: ["10:00", "15:00"], water: true, windDown: "21:30", weighDay: 5, weighTime: "07:30", mealPing: false },
     logs: { meals: {}, walks: [], sessions: [], sleep: [], stress: [], weight: [], water: {} },
     progress: {},        // progressive overload: { "Övning": { weight, full } }
-    mealPlan: null,      // { monday, roll, ids[7] }
+    mealPlan: null,      // { monday, roll, ids[7] middagar, breakfasts[7], lunches[7] }
     dayPlan: null,       // dagens slumpade matsedel { date, seed, items }
+    dagsformLog: {},     // { "YYYY-MM-DD": score } — historik för trendgrafen
     shopping: [],        // [{ t, done }]
     devices: [],         // anslutna enhets-id:n
     deviceData: {},      // { "YYYY-MM-DD": { steps, rhr, sleep } }
@@ -640,9 +641,29 @@ const FOOD_AVOID = [
 ];
 function foodOk(f) { return !FOOD_AVOID.some(([re, tag]) => state.prefs.avoid.includes(tag) && re.test(f.n)); }
 
+/* Gemensamma måltidspooler för veckoplan & dagsplan — {name, kcal, p, rid?} */
+function mealPools() {
+  const okFoods = FOODS.filter(foodOk);
+  const rp = allowedRecipes();
+  return {
+    breakfast: [
+      // Bara riktiga frukostar — småplock som ett ensamt ägg hör hemma bland mellanmålen
+      ...okFoods.filter(f => f.c === "frukost" && f.kcal >= 200).map(f => ({ name: f.n, kcal: f.kcal, p: f.p })),
+      ...rp.filter(r => r.tags.includes("frukost")).map(r => ({ name: r.name, kcal: r.kcal, p: r.p, rid: r.id })),
+    ],
+    lunch: [
+      ...rp.filter(r => !r.tags.includes("frukost") && (r.tags.includes("snabb") || r.tags.includes("matlåda") || r.tags.includes("vardag"))).map(r => ({ name: r.name, kcal: r.kcal, p: r.p, rid: r.id })),
+      ...okFoods.filter(f => f.c === "lunch").map(f => ({ name: f.n, kcal: f.kcal, p: f.p })),
+    ],
+    dinner: rp.filter(r => !r.tags.includes("frukost")),
+    snacks: okFoods.filter(f => f.c === "mellanmål" && f.kcal < 250),
+  };
+}
+
 function genMealPlan(roll) {
   const monday = weekKeys()[0];
-  const pool = allowedRecipes().filter(r => !r.tags.includes("frukost"));
+  const pools = mealPools();
+  const pool = pools.dinner;
   const rnd = makeRng(hashStr(monday) + roll * 7919);
   // Favoriter först: upp till 3 av veckans middagar hämtas från dina favoriter
   const favPool = pool.filter(r => isFav(r.id));
@@ -652,11 +673,23 @@ function genMealPlan(roll) {
   while (ids.length < 7) ids.push(pool[Math.floor(rnd() * pool.length)].id);
   // Blanda så favoriterna inte alltid ligger mån–ons
   for (let i = ids.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [ids[i], ids[j]] = [ids[j], ids[i]]; }
-  state.mealPlan = { monday, roll, ids };
+  // Frukost & lunch: variera över veckan utan att upprepa två dagar i rad
+  const pickWeek = pl => {
+    const out = [];
+    for (let i = 0; i < 7; i++) {
+      let cand = pl[Math.floor(rnd() * pl.length)], tries = 0;
+      while (out[i - 1] && cand.name === out[i - 1].name && tries++ < 5) cand = pl[Math.floor(rnd() * pl.length)];
+      out.push(cand);
+    }
+    return out;
+  };
+  const breakfasts = pickWeek(pools.breakfast);
+  const lunches = pickWeek(pools.lunch);
+  state.mealPlan = { monday, roll, ids, breakfasts, lunches };
   save();
 }
 function ensureMealPlan() {
-  if (!state.mealPlan || state.mealPlan.monday !== weekKeys()[0]) genMealPlan(0);
+  if (!state.mealPlan || state.mealPlan.monday !== weekKeys()[0] || !state.mealPlan.lunches) genMealPlan(0);
 }
 function todaysPlannedDinner() {
   ensureMealPlan();
@@ -666,9 +699,14 @@ function todaysPlannedDinner() {
 function buildShopping() {
   ensureMealPlan();
   const seen = new Set(), items = [];
-  state.mealPlan.ids.forEach(id => {
-    const r = findRecipe(id);
-    if (r) r.ing.forEach(i => { const k = i.toLowerCase(); if (!seen.has(k)) { seen.add(k); items.push({ t: i, done: false }); } });
+  const add = i => { const k = i.toLowerCase(); if (!seen.has(k)) { seen.add(k); items.push({ t: i, done: false }); } };
+  // Middagar: fulla ingredienslistor
+  state.mealPlan.ids.forEach(id => { const r = findRecipe(id); if (r) r.ing.forEach(add); });
+  // Frukost & lunch: receptbaserade får ingredienser, enkla rätter läggs som en rad
+  [...(state.mealPlan.breakfasts || []), ...(state.mealPlan.lunches || [])].forEach(m => {
+    if (!m) return;
+    const r = m.rid ? findRecipe(m.rid) : null;
+    if (r) r.ing.forEach(add); else add("Till: " + m.name);
   });
   state.shopping = items;
   save();
@@ -734,20 +772,13 @@ function openEatSuggestion() {
 function buildDayPlan(seed) {
   const rnd = makeRng(seed);
   const t = state.targets;
-  const okFoods = FOODS.filter(foodOk);
-  const rp = allowedRecipes();
+  const pools = mealPools();
   const pickR = arr => arr[Math.floor(rnd() * arr.length)];
 
-  const breakfastPool = [
-    ...okFoods.filter(f => f.c === "frukost").map(f => ({ name: f.n, kcal: f.kcal, p: f.p })),
-    ...rp.filter(r => r.tags.includes("frukost")).map(r => ({ name: r.name, kcal: r.kcal, p: r.p, rid: r.id })),
-  ];
-  const lunchPool = [
-    ...rp.filter(r => !r.tags.includes("frukost") && (r.tags.includes("snabb") || r.tags.includes("matlåda") || r.tags.includes("vardag"))).map(r => ({ name: r.name, kcal: r.kcal, p: r.p, rid: r.id })),
-    ...okFoods.filter(f => f.c === "lunch").map(f => ({ name: f.n, kcal: f.kcal, p: f.p })),
-  ];
-  const dinnerPool = rp.filter(r => !r.tags.includes("frukost")).map(r => ({ name: r.name, kcal: r.kcal, p: r.p, rid: r.id }));
-  const snackPool = okFoods.filter(f => f.c === "mellanmål" && f.kcal < 250);
+  const breakfastPool = pools.breakfast;
+  const lunchPool = pools.lunch;
+  const dinnerPool = pools.dinner.map(r => ({ name: r.name, kcal: r.kcal, p: r.p, rid: r.id }));
+  const snackPool = pools.snacks;
 
   const planned = todaysPlannedDinner();
   const items = [
@@ -1399,6 +1430,12 @@ function renderIdag(wrap) {
 
   const streak = currentStreak();
   const df = computeDagsform();
+  // Spara dagens poäng i historiken (för trendgrafen under Mål)
+  if (df.hasAnyData && state.dagsformLog[today] !== df.score) {
+    if (!state.dagsformLog) state.dagsformLog = {};
+    state.dagsformLog[today] = df.score;
+    save();
+  }
   // Halvcirkel-gauge: 0–100 över 180°
   const GR = 54, GC = Math.PI * GR; // halv omkrets
   const gaugeOff = GC * (1 - df.score / 100);
@@ -1933,12 +1970,19 @@ function renderRecept(wrap) {
     <div class="card" style="padding:.6rem 1.5rem">
       ${state.mealPlan.ids.map((id, i) => {
         const r = findRecipe(id);
-        return `<div class="hist-item" style="${i === todayIdx ? "background:linear-gradient(90deg,rgba(224,138,60,.1),transparent);margin:0 -1rem;padding:.7rem 1rem;border-radius:8px" : ""}">
-          <span><b style="font-family:var(--font-mono);font-size:.75rem;color:${i === todayIdx ? "var(--amber)" : "var(--cream-faint)"};text-transform:uppercase;letter-spacing:.1em">${dayNames[i]}${i === todayIdx ? " · idag" : ""}</b><br>
-          <button class="link-btn" data-open="${id}" style="text-decoration:none;color:var(--cream);font-size:1rem">${esc(r ? r.name : "")}</button></span>
-          <span class="h-date">${r ? r.kcal + " kcal · " + r.p + " g" : ""}</span>
+        const bf = (state.mealPlan.breakfasts || [])[i];
+        const lu = (state.mealPlan.lunches || [])[i];
+        return `<div class="hist-item" style="align-items:flex-start;${i === todayIdx ? "background:linear-gradient(90deg,rgba(224,138,60,.1),transparent);margin:0 -1rem;padding:.7rem 1rem;border-radius:8px" : ""}">
+          <span style="min-width:0">
+            <b style="font-family:var(--font-mono);font-size:.75rem;color:${i === todayIdx ? "var(--amber)" : "var(--cream-faint)"};text-transform:uppercase;letter-spacing:.1em">${dayNames[i]}${i === todayIdx ? " · idag" : ""}</b><br>
+            <button class="link-btn" data-open="${id}" style="text-decoration:none;color:var(--cream);font-size:1rem">◉ ${esc(r ? r.name : "")}</button><br>
+            <span class="plan-sub">☀ ${bf ? (bf.rid ? `<button class="link-btn plan-sub-link" data-open="${bf.rid}">${esc(bf.name)}</button>` : esc(bf.name)) : "—"}
+            &nbsp;·&nbsp; ✦ ${lu ? (lu.rid ? `<button class="link-btn plan-sub-link" data-open="${lu.rid}">${esc(lu.name)}</button>` : esc(lu.name)) : "—"}</span>
+          </span>
+          <span class="h-date" style="white-space:nowrap">${r ? (r.kcal + (bf ? bf.kcal : 0) + (lu ? lu.kcal : 0)) + " kcal · " + (r.p + (bf ? bf.p : 0) + (lu ? lu.p : 0)) + " g" : ""}</span>
         </div>`;
       }).join("")}
+      <p class="sub" style="font-size:.78rem;padding:.5rem 0 .7rem">◉ middag · ☀ frukost · ✦ lunch — kcal/protein per dag avser alla tre. Mellanmål fyller du på med via "Slumpa dagens matsedel" på Idag.</p>
     </div>
 
     ${state.shopping.length ? `
@@ -2274,6 +2318,37 @@ function renderMal(wrap) {
       </div>
       ${tooFast ? `<p class="sub" style="margin-top:.8rem;color:var(--clay)"><b>⚠ Du tappar över 1 % av kroppsvikten per vecka</b> — det ökar risken att muskler följer med. Överväg takten "Medel" eller "Lugn" nedan.</p>` : ""}
     </div>
+
+    ${(() => {
+      // Dagsform — senaste 14 dagarna som staplar med statusfärg
+      const log = state.dagsformLog || {};
+      const days = [];
+      for (let i = 13; i >= 0; i--) {
+        const d = new Date(); d.setDate(d.getDate() - i);
+        const k = dkey(d);
+        days.push({ k, lbl: ["S", "M", "T", "O", "T", "F", "L"][d.getDay()], score: log[k] != null ? log[k] : null, isToday: i === 0 });
+      }
+      const scored = days.filter(d => d.score != null);
+      if (!scored.length) return "";
+      const avg = Math.round(scored.reduce((a, d) => a + d.score, 0) / scored.length);
+      const col = s => s >= 80 ? "var(--sage)" : s >= 60 ? "var(--amber-soft)" : s >= 40 ? "var(--amber)" : "var(--clay)";
+      return `
+      <div class="section-title">Dagsform — trend<span class="st-line"></span></div>
+      <div class="card" style="margin-bottom:1.6rem">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:1.5rem;flex-wrap:wrap">
+          <div><div class="card-kicker">Snitt senaste 14 dagarna</div>
+            <div class="big-num" style="color:${col(avg)}">${avg}<small> av 100</small></div></div>
+          <div class="df-bars" role="img" aria-label="Dagsform per dag, senaste 14 dagarna">
+            ${days.map(d => `
+              <div class="df-col" title="${d.k}${d.score != null ? " · " + d.score : " · ingen data"}">
+                <div class="df-bar-track"><div class="df-bar" style="height:${d.score != null ? Math.max(8, d.score) : 0}%;background:${d.score != null ? col(d.score) : "transparent"}"></div></div>
+                <span class="df-lbl ${d.isToday ? "today" : ""}">${d.lbl}</span>
+              </div>`).join("")}
+          </div>
+        </div>
+        <p class="sub" style="margin-top:.8rem;font-size:.85rem">Leta mönster: dyk efter sena kvällar, alkohol eller hårda pass? Grön ≥ 80 · ljusbärnsten ≥ 60 · bärnsten ≥ 40 · lera under 40. Dagar utan data lämnas tomma.</p>
+      </div>`;
+    })()}
 
     <div class="section-title">Din energibudget<span class="st-line"></span></div>
     <div class="grid-2" style="margin-bottom:1.2rem">
