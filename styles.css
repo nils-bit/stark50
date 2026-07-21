@@ -507,6 +507,17 @@ label { display: block; font-size: .82rem; font-weight: 700; text-transform: upp
 .df-lbl { font-family: var(--font-mono); font-size: .62rem; color: var(--cream-faint); }
 .df-lbl.today { color: var(--amber); font-weight: 700; }
 
+/* Kalenderexportens kryssrader */
+.ics-opt {
+  display: flex; align-items: center; gap: .6rem;
+  text-transform: none; letter-spacing: 0; font-size: .95rem; font-weight: 500;
+  color: var(--cream); cursor: pointer;
+  background: var(--bg-deep); border: 1px solid var(--line); border-radius: var(--radius-sm);
+  padding: .7rem .9rem;
+}
+.ics-opt input[type="checkbox"] { width: auto; accent-color: var(--amber); }
+.ics-opt:has(input:disabled) { opacity: .45; cursor: not-allowed; }
+
 /* Matsedelns frukost/lunch-underrader */
 .plan-sub { font-size: .82rem; color: var(--cream-dim); line-height: 1.7; }
 .plan-sub-link { font-size: .82rem; color: var(--cream-dim); text-decoration-color: var(--line); }
