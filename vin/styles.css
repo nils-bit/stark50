@@ -63,6 +63,21 @@ body {
 }
 .hero p { color: var(--ink-dim); font-size: 1.05rem; }
 
+/* ── Fritext ── */
+.food-form { display: flex; gap: 8px; margin: 4px 0 8px; max-width: 560px; }
+.food-input { flex: 1; max-width: none; }
+.food-btn {
+  font-family: var(--font-body); font-weight: 700; font-size: 0.95rem;
+  background: var(--accent-soft); color: #fff; border: 1px solid var(--accent);
+  padding: 0 22px; border-radius: 12px; cursor: pointer; white-space: nowrap; transition: background .12s;
+}
+.food-btn:hover { background: var(--accent); }
+.food-error { color: var(--gold); font-size: 0.92rem; margin: 8px 0 4px; max-width: 560px; }
+@media (max-width: 560px) {
+  .food-form { flex-direction: column; }
+  .food-btn { padding: 11px 22px; }
+}
+
 /* ── Dish grid ── */
 .dish-group { margin: 26px 0; }
 .dish-group h2 {

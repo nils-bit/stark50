@@ -259,6 +259,103 @@ const DISHES = [
 const DISH_GROUPS = [...new Set(DISHES.map(d => d.grp))];
 
 /* ──────────────────────────────────────────────
+   Fritexttolkning — nyckelord per rätt.
+   Matchar även svenska sammansättningar ("kycklingspett" → kyckling).
+   ────────────────────────────────────────────── */
+const DISH_KEYWORDS = {
+  biff:      ["biff", "entrecôte", "entrecote", "ryggbiff", "oxfilé", "oxfile", "flankstek", "rostbiff", "tournedos", "chateaubriand", "nötkött", "notkott", "steak", "planka"],
+  gryta:     ["gryta", "högrev", "hogrev", "bourguignon", "kalops", "oxsvans", "oxkind", "långkok", "langkok", "brässerad", "brasserad", "stroganoff"],
+  vilt:      ["vilt", "älg", "alg", "hjort", "rådjur", "radjur", "ren", "renskav", "vildsvin"],
+  burgare:   ["hamburgare", "burgare", "burger", "köttfärs", "kottfars", "färsbiff", "farsbiff", "köttbulle", "kottbulle", "köttbullar", "kottbullar", "pannbiff"],
+  lamm:      ["lamm", "lammstek", "lammracks", "lammfärs", "lammfars", "lammkotlett", "lammkött", "lammkott"],
+  flask:     ["fläsk", "flask", "karré", "karre", "pulled", "revben", "ribs", "kotlett", "sidfläsk", "sidflask", "skinka", "grisfilé", "grisfile", "fläskfilé", "flaskfile", "bacon"],
+  chark:     ["chark", "salami", "prosciutto", "serrano", "korv", "paté", "pate", "tapas", "lufttorkad", "chorizo", "bratwurst"],
+  kyckling:  ["kyckling", "chicken", "höna", "hona", "kycklingfilé", "kycklingfile", "broiler"],
+  anka:      ["anka", "ankbröst", "ankbrost", "confit", "kalkon", "gås", "gas"],
+  vitfisk:   ["torsk", "sej", "gös", "gos", "kolja", "hälleflundra", "halleflundra", "abborre", "piggvar", "sjötunga", "sjotunga", "fisk", "fish", "sill", "strömming", "stromming"],
+  lax:       ["lax", "röding", "roding", "öring", "oring", "makrill", "tonfisk", "gravlax", "gravad"],
+  skaldjur:  ["räk", "räka", "räkor", "raka", "rakor", "kräft", "kräfta", "kräftor", "krafta", "kraftor", "mussla", "musslor", "ostron", "hummer", "skaldjur", "krabba", "pilgrimsmussla", "vongole", "scampi", "languster"],
+  sushi:     ["sushi", "poké", "poke", "sashimi", "maki", "nigiri"],
+  svamp:     ["svamp", "risotto", "tryffel", "kantarell", "karljohan", "umami", "portabello", "shiitake"],
+  tomatpasta:["tomat", "pasta", "arrabbiata", "pizza", "margherita", "napolitana", "pomodoro", "bolognese", "spaghetti", "penne"],
+  kramig:    ["carbonara", "alfredo", "gratäng", "gratang", "krämig", "kramig", "grädde", "gradde", "gräddsås", "graddsas", "ostsås", "ostsas", "lasagne", "cannelloni", "mac"],
+  sallad:    ["sallad", "getost", "chèvre", "chevre", "sparris", "örter", "orter", "bowl", "caesarsallad", "burrata"],
+  grillgront:["halloumi", "aubergine", "zucchini", "grönsak", "gronsak", "vegetarisk", "vegansk", "bönbiff", "bonbiff", "falafel", "paprika", "grönsaker", "gronsaker"],
+  thai:      ["thai", "curry", "wok", "pad", "vietnamesisk", "kryddstark", "stark", "chili", "sichuan", "koreansk", "kimchi", "ramen", "sriracha", "sambal"],
+  indiskt:   ["indisk", "tikka", "masala", "korma", "dal", "tandoori", "vindaloo", "naan", "biryani"],
+  taco:      ["taco", "tacos", "texmex", "fajita", "burrito", "quesadilla", "enchilada", "nacho", "tortilla"],
+  ostbricka: ["ost", "ostbricka", "brie", "cheddar", "comté", "comte", "manchego", "parmesan", "gruyère", "gruyere", "västerbotten", "vasterbotten"],
+  blamogel:  ["blåmögel", "blamogel", "roquefort", "gorgonzola", "stilton", "ädelost", "adelost"],
+  choklad:   ["choklad", "fondant", "brownie", "mousse", "kladdkaka", "ganache", "kakao"],
+  fruktdessert:["dessert", "paj", "äppelpaj", "appelpaj", "maräng", "marang", "pannacotta", "glass", "sorbet", "tarte", "bär", "jordgubb", "hallon", "citron", "cheesecake"],
+  fordrink:  ["fördrink", "fordrink", "aperitif", "mingel", "skål", "skal", "nyår", "nyar", "bubbel", "firande", "champagne"],
+  buffe:     ["buffé", "buffe", "plockmat", "picknick", "brunch", "julbord", "knytkalas"],
+};
+
+function normalizeFood(s) {
+  return s.toLowerCase().replace(/[^a-zåäöéèüæø]+/g, " ").trim();
+}
+
+/* Rätter där råvaran är huvudsaken — de ska vinna över modifierare
+   som "chili" eller "grädde" när båda finns i texten */
+const PROTEIN_DISHES = new Set(["biff", "gryta", "vilt", "burgare", "lamm", "flask",
+  "chark", "kyckling", "anka", "vitfisk", "lax", "skaldjur", "sushi"]);
+
+function interpretFood(text) {
+  const tokens = normalizeFood(text).split(/\s+/).filter(t => t.length >= 3);
+  if (!tokens.length) return null;
+  const hits = [];
+  for (const d of DISHES) {
+    let score = 0;
+    for (const kw of DISH_KEYWORDS[d.id] || []) {
+      const hit = tokens.some(t =>
+        t === kw ||
+        (kw.length >= 3 && t.startsWith(kw)) ||
+        (kw.length >= 4 && t.includes(kw)) ||
+        (t.length >= 4 && kw.includes(t) && kw.length - t.length <= 2));
+      if (hit) score += kw.length + (PROTEIN_DISHES.has(d.id) ? 5 : 0);
+    }
+    if (score > 0) hits.push({ d, score });
+  }
+  if (!hits.length) return null;
+  hits.sort((a, b) => b.score - a.score);
+  const primary = hits[0].d;
+  const secondary = hits.length > 1 && hits[1].score >= 0.35 * hits[0].score ? hits[1].d : null;
+  return mergeDishes(text, primary, secondary);
+}
+
+/* Slår ihop två rätters krav — "grillad lax med chili" = lax + kryddstarkt */
+function mergeDishes(text, p, s) {
+  const label = text.trim().replace(/^./, c => c.toUpperCase());
+  if (!s) {
+    return { ...p, id: "custom", name: label, emoji: "✍️",
+      why: `Tolkat som ${p.emoji} ${p.name.toLowerCase()}. ${p.why}` };
+  }
+  const half = obj => Object.fromEntries(Object.entries(obj || {}).map(([k, v]) => [k, Math.round(v / 2)]));
+  const merge = (a, b) => {
+    const out = { ...b };
+    for (const [k, v] of Object.entries(a)) out[k] = Math.max(out[k] || 0, v);
+    return out;
+  };
+  const clocks = { ...(s.clocks || {}) };
+  for (const [k, r] of Object.entries(p.clocks || {})) {
+    if (clocks[k]) {
+      const lo = Math.max(r[0], clocks[k][0]), hi = Math.min(r[1], clocks[k][1]);
+      clocks[k] = lo <= hi ? [lo, hi] : r;
+    } else clocks[k] = r;
+  }
+  return {
+    id: "custom", grp: "", emoji: "✍️", name: label, sub: "",
+    sym: merge(p.sym, half(s.sym)),
+    cat2: merge(p.cat2, half(s.cat2)),
+    c3: merge(p.c3, half(s.c3)),
+    clocks,
+    grapes: [...new Set([...(p.grapes || []), ...(s.grapes || [])])],
+    why: `Tolkat som ${p.emoji} ${p.name.toLowerCase()} + ${s.emoji} ${s.name.toLowerCase()}. ${p.why}`,
+  };
+}
+
+/* ──────────────────────────────────────────────
    Parningsmotorn
    ────────────────────────────────────────────── */
 function clockScore(val, range) {
@@ -404,6 +501,8 @@ const state = {
   search: "",
   exploreCat: "Alla",
   exploreShown: 15,
+  foodText: "",
+  foodError: false,
 };
 
 const PRICE_STEPS = [0, 100, 150, 200, 300, 500];
@@ -445,13 +544,35 @@ function renderPara() {
     main.innerHTML = `
     <div class="hero">
       <h1>Vad ska du äta?</h1>
-      <p>Välj rätt så föreslår vi viner ur Systembolagets fasta sortiment — baserat på deras egna smakklockor och matsymboler.</p>
+      <p>Skriv rätten själv eller välj nedan — vi föreslår viner ur Systembolagets fasta sortiment, baserat på deras egna smakklockor och matsymboler.</p>
     </div>
+    <form class="food-form" id="foodForm">
+      <input type="search" class="search food-input" id="foodInput"
+        placeholder="T.ex. grillad lax med chili, kycklingcurry, oxfilé…"
+        value="${esc(state.foodText)}" autocomplete="off">
+      <button type="submit" class="food-btn">Hitta vin</button>
+    </form>
+    ${state.foodError ? `<div class="food-error">Hittade ingen känd rätt i texten — prova t.ex. "grillad lax med chili" eller välj en rätt nedan.</div>` : ""}
     ${groups}`;
+    $("#foodForm").addEventListener("submit", e => {
+      e.preventDefault();
+      state.foodText = $("#foodInput").value;
+      const dish = interpretFood(state.foodText);
+      if (dish) {
+        state.foodError = false;
+        state.dish = dish;
+        state.shown = 9;
+      } else {
+        state.foodError = true;
+      }
+      renderPara();
+      window.scrollTo({ top: 0 });
+    });
     main.querySelectorAll("[data-dish]").forEach(btn =>
       btn.addEventListener("click", () => {
         state.dish = DISHES.find(d => d.id === btn.dataset.dish);
         state.shown = 9;
+        state.foodError = false;
         renderPara();
         window.scrollTo({ top: 0 });
       }));
