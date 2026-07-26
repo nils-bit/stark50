@@ -660,3 +660,64 @@ a { color: var(--amber); }
   .ai-item { grid-template-columns: 1fr 64px 64px 24px; gap: .4rem; padding: .6rem; }
   .ai-num input { padding: .35rem .3rem; }
 }
+
+/* ══════════════ PROTEIN PER MÅLTID ══════════════ */
+.prot-dist { display: flex; gap: .9rem; align-items: flex-end; margin-top: .9rem; }
+.pd-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: .35rem; }
+.pd-bar { position: relative; width: 100%; height: 68px; background: var(--panel-2);
+  border-radius: var(--radius-sm); overflow: hidden; display: flex; align-items: flex-end; }
+.pd-bar > span:first-child { width: 100%; background: var(--amber); border-radius: var(--radius-sm);
+  transition: height .25s ease; min-height: 2px; }
+.pd-bar > span:first-child.hit { background: var(--sage); }
+/* Mellanmål har ingen tröskel — dämpad så den inte konkurrerar med huvudmålen */
+.pd-bar > span:first-child.muted { background: var(--cream-faint); opacity: .55; }
+.pd-line { position: absolute; left: 0; right: 0; height: 0; border-top: 1px dashed var(--cream-faint);
+  opacity: .65; pointer-events: none; }
+.pd-lbl { font-family: var(--font-mono); font-size: .68rem; color: var(--cream-faint); }
+.pd-val { font-family: var(--font-mono); font-size: .82rem; font-weight: 700; color: var(--cream-dim); }
+.pd-val.hit { color: var(--sage); }
+
+.mg-prot { display: flex; align-items: center; gap: .6rem; margin: -.2rem 0 .6rem; }
+.mg-prot-bar { flex: 1; max-width: 120px; height: 4px; background: var(--panel-2);
+  border-radius: 999px; overflow: hidden; }
+.mg-prot-bar > span { display: block; height: 100%; background: var(--cream-faint); border-radius: 999px; }
+.mg-prot.near .mg-prot-bar > span { background: var(--amber); }
+.mg-prot.hit .mg-prot-bar > span { background: var(--sage); }
+.mg-prot-txt { font-family: var(--font-mono); font-size: .72rem; color: var(--cream-faint); }
+.mg-prot.hit .mg-prot-txt { color: var(--sage); }
+
+/* ══════════════ TILLSKOTT ══════════════ */
+.supp-row { display: grid; gap: .55rem; margin-top: .8rem; }
+.supp {
+  display: flex; align-items: center; gap: .7rem; width: 100%; text-align: left;
+  padding: .7rem .85rem; background: var(--panel-2); border: 1px solid var(--line);
+  border-radius: var(--radius-sm); color: var(--cream-dim); cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.supp:hover { border-color: var(--amber); }
+.supp.on { border-color: var(--sage); background: rgba(147, 172, 143, .1); color: var(--cream); }
+.supp-mark {
+  width: 24px; height: 24px; flex-shrink: 0; border-radius: 6px;
+  border: 1.5px solid var(--line); display: flex; align-items: center; justify-content: center;
+  font-size: .85rem; color: var(--bg-deep);
+}
+.supp.on .supp-mark { background: var(--sage); border-color: var(--sage); }
+.supp b { display: block; font-size: .92rem; }
+.supp small { display: block; font-size: .74rem; color: var(--cream-faint); margin-top: .1rem; }
+
+/* ══════════════ BLODTRYCK ══════════════ */
+.bp-spark { display: flex; align-items: flex-end; gap: .3rem; height: 56px; margin-top: 1rem; }
+.bp-dot { flex: 1; max-width: 18px; border-radius: 3px 3px 0 0; background: var(--cream-faint); }
+.bp-dot.sage { background: var(--sage); }
+.bp-dot.amber { background: var(--amber); }
+.bp-dot.clay { background: var(--clay); }
+
+/* ══════════════ ÅTERHÄMTNINGSVARNING ══════════════ */
+.sch-warn {
+  display: flex; gap: .7rem; align-items: flex-start; margin-top: 1.1rem;
+  padding: .8rem .9rem; border-radius: var(--radius-sm);
+  background: rgba(224, 138, 60, .1); border: 1px solid rgba(224, 138, 60, .35);
+  font-size: .84rem; color: var(--cream-dim); line-height: 1.45;
+}
+.sch-warn-ico { flex-shrink: 0; }
+.sch-warn b { color: var(--amber-soft); }

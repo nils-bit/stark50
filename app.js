@@ -221,7 +221,7 @@ function defaultState() {
     body: [],            // kroppsmått: { date, waist, neck, bf }
     workouts: [],
     reminders: { walks: ["10:00", "15:00"], water: true, windDown: "21:30", weighDay: 5, weighTime: "07:30", mealPing: false },
-    logs: { meals: {}, walks: [], sessions: [], sleep: [], stress: [], weight: [], water: {} },
+    logs: { meals: {}, walks: [], sessions: [], sleep: [], stress: [], weight: [], water: {}, supps: {}, bp: [] },
     progress: {},        // progressive overload: { "Övning": { weight, full } }
     mealPlan: null,      // { monday, roll, ids[7] middagar, breakfasts[7], lunches[7] }
     dayPlan: null,       // dagens slumpade matsedel { date, seed, items }
@@ -244,6 +244,8 @@ function load() {
       // Object.assign är ytlig — nya nycklar inuti gamla objekt måste fyllas i här
       s.schedule = Object.assign({ days: {}, time: "17:00", remind: true }, s.schedule || {});
       if (!s.schedule.days || typeof s.schedule.days !== "object") s.schedule.days = {};
+      // En sparad logs ersätter hela standardobjektet, så nya loggtyper måste läggas tillbaka
+      s.logs = Object.assign({ meals: {}, walks: [], sessions: [], sleep: [], stress: [], weight: [], water: {}, supps: {}, bp: [] }, s.logs || {});
       return s;
     }
   } catch (e) { /* korrupt data → börja om */ }
@@ -326,6 +328,32 @@ function weekSchedule() {
   });
 }
 
+/* ─────────────── ÅTERHÄMTNING MELLAN PASS ───────────────
+   Muskelproteinsyntesen efter ett tungt pass pågår ungefär 24–48 timmar, och
+   återhämtningsförmågan sjunker med åldern. Två pass som belastar samma
+   muskler dagar i rad ger därför sämre resultat än om de sprids ut. Vi jämför
+   övningsnamn — delar två pass minst en tredjedel av övningarna räknas de som
+   överlappande. "Auto" jämförs inte; det passet är inte bestämt än. */
+function similarWorkouts(a, b) {
+  if (!a || !b || a.auto || b.auto) return false;
+  if (a.id === b.id) return true;
+  const namesA = new Set(a.exercises.map(e => e.name.toLowerCase()));
+  if (!namesA.size || !b.exercises.length) return false;
+  const shared = b.exercises.filter(e => namesA.has(e.name.toLowerCase())).length;
+  return shared / Math.min(namesA.size, b.exercises.length) >= 0.34;
+}
+
+/* Par av intilliggande schemalagda dagar som tränar samma sak */
+function recoveryConflicts() {
+  const out = [];
+  for (let dow = 0; dow <= 6; dow++) {
+    const next = (dow + 1) % 7;
+    const a = workoutForDay(dow), b = workoutForDay(next);
+    if (a && b && similarWorkouts(a, b)) out.push({ a: dow, b: next, name: a.id === b.id ? a.name : null });
+  }
+  return out;
+}
+
 /* Förslag på jämnt utspridda dagar för N pass/vecka — används vid onboarding. */
 function suggestScheduleDays(n) {
   const presets = { 1: [3], 2: [2, 5], 3: [1, 3, 5], 4: [1, 2, 4, 5], 5: [1, 2, 3, 4, 5], 6: [1, 2, 3, 4, 5, 6] };
@@ -371,6 +399,68 @@ function calcTargets(p) {
     steps: 8000, // 7–8 000 steg/dag fångar merparten av hälsovinsten (Lancet 2025)
     sleepHours: 7.5,
     waterGlasses: 8,
+  };
+}
+
+/* ─────────────── PROTEIN PER MÅLTID ───────────────
+   Efter 50 räcker det inte att nå dagsmålet — fördelningen avgör.
+   Anabol resistens gör att muskeln behöver en större dos per måltid för att
+   sätta igång proteinsyntesen; forskningen landar runt 0,4 g/kg kroppsvikt och
+   måltid (Moore m.fl. 2015), och 3–4 sådana doser per dag. Ett dygn med 150 g
+   protein där 120 g kommer på middagen bygger mindre muskel än samma mängd
+   jämnt fördelad. Golvet nedan garanterar tröskeln; överskottet läggs på
+   huvudmålen och resten faller på mellanmål. */
+const MAIN_MEALS = ["frukost", "lunch", "middag"];
+
+function proteinPerMeal() {
+  const kg = state.profile.weight || 80;
+  const daily = state.targets.protein || Math.round(kg * 1.6);
+  const threshold = Math.round(0.4 * kg);            // anabol tröskel per måltid
+  const main = Math.max(threshold, Math.round(daily * 0.28)); // ~28 % × 3 huvudmål
+  return {
+    frukost: main, lunch: main, middag: main,
+    "mellanmål": Math.max(0, daily - main * 3),
+    threshold,
+  };
+}
+
+/* Protein per måltidstyp för ett visst datum */
+function proteinByMeal(dateKey) {
+  const out = { frukost: 0, lunch: 0, middag: 0, "mellanmål": 0 };
+  (state.logs.meals[dateKey] || []).forEach(m => {
+    if (out[m.meal] != null) out[m.meal] += m.p || 0;
+  });
+  return out;
+}
+
+/* Hur många huvudmål som nådde tröskeln — det är det måttet som betyder något */
+function mainMealsHittingThreshold(dateKey) {
+  const got = proteinByMeal(dateKey), tgt = proteinPerMeal();
+  return MAIN_MEALS.filter(m => got[m] >= tgt.threshold).length;
+}
+
+/* ─────────────── BLODTRYCK ───────────────
+   Efter 50 säger blodtrycket mer om risken än vad vågen gör, och det är ett av
+   få mått du kan följa själv. Kategorierna följer europeisk praxis (ESC/ESH).
+   Appen ställer ingen diagnos — den visar var värdet ligger och när det är
+   dags att prata med vården. */
+function bpCategory(sys, dia) {
+  if (sys >= 180 || dia >= 110) return { label: "Mycket högt", cls: "clay", advice: "Kontakta vården. Vid samtidig bröstsmärta, andnöd eller synrubbning — sök akut." };
+  if (sys >= 160 || dia >= 100) return { label: "Högt (grad 2)", cls: "clay", advice: "Boka tid hos vårdcentralen för utredning." };
+  if (sys >= 140 || dia >= 90) return { label: "Högt (grad 1)", cls: "clay", advice: "Mät om vid några tillfällen. Ligger det kvar här bör du ta det med vårdcentralen." };
+  if (sys >= 130 || dia >= 85) return { label: "Högt normalt", cls: "amber", advice: "Här gör vikt, promenader, salt, sömn och alkohol tydlig skillnad." };
+  if (sys >= 120 || dia >= 80) return { label: "Normalt", cls: "amber", advice: "Bra läge — håll i träningen och promenaderna." };
+  return { label: "Optimalt", cls: "sage", advice: "Optimalt värde. Fortsätt precis så här." };
+}
+
+/* Snitt av de senaste mätningarna — ett enskilt värde säger nästan ingenting */
+function bpAverage(n = 5) {
+  const last = state.logs.bp.slice(-n);
+  if (!last.length) return null;
+  return {
+    sys: Math.round(last.reduce((a, b) => a + b.sys, 0) / last.length),
+    dia: Math.round(last.reduce((a, b) => a + b.dia, 0) / last.length),
+    n: last.length,
   };
 }
 
@@ -1616,6 +1706,9 @@ function renderIdag(wrap) {
       : sched.dateKey === dkey(new Date(Date.now() + 864e5)) ? "Imorgon" : DAYS[sched.dow].toLowerCase())
     : null;
   const restToday = hasSchedule && !scheduledFor(today);
+  const supps = state.logs.supps[today] || {};
+  // I Sverige ger solen för lite UVB för egen D-vitaminproduktion under vinterhalvåret
+  const darkMonths = [9, 10, 11, 0, 1, 2].includes(new Date().getMonth());
   const dayRecipe = todaysPlannedDinner();
   const sleepToday = state.logs.sleep.find(s => s.date === today);
   const stressToday = state.logs.stress.find(s => s.date === today);
@@ -1745,6 +1838,23 @@ function renderIdag(wrap) {
       </div>
 
       <div class="card">
+        <div class="card-kicker">Tillskott</div>
+        <div class="supp-row">
+          <button class="supp ${supps.d ? "on" : ""}" id="suppD">
+            <span class="supp-mark">${supps.d ? "✓" : ""}</span>
+            <span><b>D-vitamin</b><small>${darkMonths ? "10 µg — extra viktigt nu i mörkret" : "10 µg per dag"}</small></span>
+          </button>
+          <button class="supp ${supps.kreatin ? "on" : ""}" id="suppK">
+            <span class="supp-mark">${supps.kreatin ? "✓" : ""}</span>
+            <span><b>Kreatin</b><small>3–5 g monohydrat</small></span>
+          </button>
+        </div>
+        <p class="sub" style="margin-top:.7rem;font-size:.82rem">${darkMonths
+          ? "Oktober–mars producerar huden i Sverige i princip inget D-vitamin — då kommer allt från mat och tillskott."
+          : "Kreatin är ett av de bäst belagda tillskotten för muskel och styrka efter 50. Ta det varje dag, inte bara träningsdagar."}</p>
+      </div>
+
+      <div class="card">
         <div class="card-kicker">💧 Vatten</div>
         <div style="display:flex;align-items:center;justify-content:space-between;gap:1rem">
           <div class="big-num">${water}<small> / ${t.waterGlasses} glas</small></div>
@@ -1790,6 +1900,13 @@ function renderIdag(wrap) {
   if (nextWk) { const b = $("#startWkBtn"); if (b) b.onclick = () => startSession(nextWk.id); }
   const gwb = $("#genWkBtn");
   if (gwb) gwb.onclick = openWorkoutGen;
+  const toggleSupp = k => {
+    if (!state.logs.supps[today]) state.logs.supps[today] = {};
+    state.logs.supps[today][k] = !state.logs.supps[today][k];
+    save(); renderIdag(wrap);
+  };
+  $("#suppD").onclick = () => toggleSupp("d");
+  $("#suppK").onclick = () => toggleSupp("kreatin");
   $("#waterBtn").onclick = () => {
     state.logs.water[today] = (state.logs.water[today] || 0) + 1; save();
     if (state.logs.water[today] === state.targets.waterGlasses) toast("💧", "Vattenmål nått!", "Bra jobbat — full pott idag.");
@@ -2278,6 +2395,9 @@ function renderMat(wrap) {
   const t = state.targets;
   const groups = ["frukost", "lunch", "middag", "mellanmål"];
   const meals = mealsFor(matDate);
+  const gp = proteinByMeal(matDate);
+  const pTarget = proteinPerMeal();
+  const hits = MAIN_MEALS.filter(m => gp[m] >= pTarget.threshold).length;
 
   wrap.innerHTML = `
     <div class="date-nav">
@@ -2288,6 +2408,31 @@ function renderMat(wrap) {
     <div class="grid-2" style="margin-bottom:1.6rem">
       <div class="card"><div class="card-kicker">Kalorier</div>${pbar(tot.kcal, t.kcal)}</div>
       <div class="card"><div class="card-kicker">Protein</div>${pbar(tot.p, t.protein, "sage-f")}</div>
+    </div>
+
+    <div class="card ${hits >= 3 ? "sage-c" : ""}" style="margin-bottom:1.6rem">
+      <div class="card-kicker">Proteinfördelning · ${hits} av 3 huvudmål över ${pTarget.threshold} g</div>
+      <div class="prot-dist">
+        ${MAIN_MEALS.map(m => `
+          <div class="pd-col">
+            <div class="pd-bar"><span class="${gp[m] >= pTarget.threshold ? "hit" : ""}"
+              style="height:${Math.min(100, Math.round(gp[m] / Math.max(1, pTarget[m]) * 100))}%"></span>
+              <span class="pd-line" style="bottom:${Math.min(100, Math.round(pTarget.threshold / Math.max(1, pTarget[m]) * 100))}%"></span>
+            </div>
+            <span class="pd-lbl">${m.slice(0, 3)}</span>
+            <span class="pd-val ${gp[m] >= pTarget.threshold ? "hit" : ""}">${Math.round(gp[m])}</span>
+          </div>`).join("")}
+        <div class="pd-col">
+          <div class="pd-bar"><span class="muted" style="height:${Math.min(100, Math.round(gp["mellanmål"] / Math.max(1, pTarget["mellanmål"] || 1) * 100))}%"></span></div>
+          <span class="pd-lbl">mel</span>
+          <span class="pd-val">${Math.round(gp["mellanmål"])}</span>
+        </div>
+      </div>
+      <p class="sub" style="margin-top:.9rem;font-size:.85rem">
+        ${hits >= 3
+          ? "Bra fördelat — alla tre huvudmål nådde tröskeln. Det är så du skyddar muskelmassan."
+          : `Efter 50 svarar muskeln trögare på protein. Sikta på minst <b>${pTarget.threshold} g</b> vid varje huvudmål istället för en stor dos på kvällen — samma dagssumma, mer muskel.`}
+      </p>
     </div>
     ${groups.map(g => {
       const items = meals.filter(m => m.meal === g);
@@ -2301,6 +2446,16 @@ function renderMat(wrap) {
             <button class="link-btn" data-add="${g}">+ Lägg till</button>
           </div>
         </div>
+        ${(() => {
+          const got = Math.round(gp[g]), tgt = pTarget[g];
+          if (!tgt) return "";
+          const hit = got >= tgt, near = got >= tgt * 0.75;
+          const isMain = MAIN_MEALS.includes(g);
+          return `<div class="mg-prot ${hit ? "hit" : near ? "near" : ""}">
+            <span class="mg-prot-bar"><span style="width:${Math.min(100, Math.round(got / tgt * 100))}%"></span></span>
+            <span class="mg-prot-txt">${got} / ${tgt} g protein${hit ? " ✓" : isMain && got > 0 && !near ? " — lågt för ett huvudmål" : ""}</span>
+          </div>`;
+        })()}
         ${items.length ? items.map((m, i) => `
           <div class="meal-item">
             <span>${esc(m.name)}</span>
@@ -2376,6 +2531,7 @@ function renderTraning(wrap) {
   const sinceDeload = total % 18;
   const deloadSoon = total >= 16 && sinceDeload >= 16;
   const schDays = scheduleDays();
+  const schConflicts = recoveryConflicts();
 
   wrap.innerHTML = `
     <div class="card accent" style="margin-bottom:1.2rem;display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap">
@@ -2418,6 +2574,12 @@ function renderTraning(wrap) {
           <label class="sch-check"><input type="checkbox" id="schRemind" ${state.schedule.remind !== false ? "checked" : ""}> Påminn mig</label>
           <button class="btn ghost small" id="schIcs">📅 Lägg i kalendern</button>
         </div>
+        ${schConflicts.length ? `
+          <div class="sch-warn">
+            <span class="sch-warn-ico">⚠️</span>
+            <div><b>${schConflicts.map(c => DAYS[c.a] + " → " + DAYS[c.b].toLowerCase()).join(", ")}</b> tränar samma muskler två dagar i rad.
+            Muskeln bygger sig i 24–48 timmar efter passet, och den tiden blir längre med åldern — lägg en dag emellan så får du mer av samma träning.</div>
+          </div>` : ""}
         <div class="sch-week">
           ${weekSchedule().map(d => `
             <div class="sch-cell ${d.today ? "today" : ""}">
@@ -2989,6 +3151,9 @@ function renderMal(wrap) {
   const weights = state.logs.weight;
   const lastW = weights.length ? weights[weights.length - 1].kg : p.weight;
   const tr = weightTrend();
+  const lastBp = state.logs.bp.length ? state.logs.bp[state.logs.bp.length - 1] : null;
+  const bpAvg = bpAverage();
+  const bpCat = bpAvg ? bpCategory(bpAvg.sys, bpAvg.dia) : null;
   const dayLbl = ["M", "T", "O", "T", "F", "L", "S"];
   const alco = wk.reduce((a, k) => a + mealsFor(k).filter(m => m.alco).length, 0);
   const streak = currentStreak();
@@ -3129,6 +3294,35 @@ function renderMal(wrap) {
           <p class="sub" style="margin-top:.7rem">${lastBody.bf != null ? bfCategory(lastBody.bf) + ". " : ""}${state.body.length > 1 ? "Förändring midja: " + (lastBody.waist - state.body[0].waist > 0 ? "+" : "") + String(Math.round((lastBody.waist - state.body[0].waist) * 10) / 10).replace(".", ",") + " cm sedan start." : "Följ förändringen — inte den exakta siffran."}</p>
         ` : `<p class="sub" style="margin-top:.5rem">Logga midja och hals så räknar appen ut midja/längd-kvot (starkaste hemmamåttet enligt forskningen) och kroppsfett enligt US Navy-formeln. Perfekt när vågen står still men fettet minskar.</p>`}
       </div>
+    </div>
+
+    <div class="section-title">Blodtryck<span class="st-line"></span></div>
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-kicker">Mät en gång i veckan</div>
+        <p class="sub" style="margin:.5rem 0 1rem">Sitt still i fem minuter först, fötterna i golvet, manschetten i hjärthöjd. Mät två gånger med en minuts mellanrum och logga det andra värdet — det första är nästan alltid högre.</p>
+        <div style="display:flex;gap:.5rem;align-items:flex-end;flex-wrap:wrap">
+          <div style="width:104px"><label>Övertryck</label><input id="bpSys" type="number" min="60" max="260" placeholder="${lastBp ? lastBp.sys : "128"}"></div>
+          <div style="width:104px"><label>Undertryck</label><input id="bpDia" type="number" min="40" max="160" placeholder="${lastBp ? lastBp.dia : "82"}"></div>
+          <button class="btn small" id="bpSave">Logga</button>
+        </div>
+      </div>
+      <div class="card ${bpAvg ? bpCat.cls + "-c" : ""}">
+        <div class="card-kicker">${bpAvg ? "Snitt av senaste " + bpAvg.n + (bpAvg.n === 1 ? " mätningen" : " mätningarna") : "Varför blodtryck?"}</div>
+        ${bpAvg ? `
+          <div style="display:flex;gap:2rem;flex-wrap:wrap;align-items:baseline;margin-top:.4rem">
+            <div><div class="big-num" style="font-size:1.9rem">${bpAvg.sys}/${bpAvg.dia}</div><p class="sub">mmHg</p></div>
+            <div><div class="big-num" style="font-size:1.3rem;color:var(--${bpCat.cls})">${bpCat.label}</div>
+              <p class="sub">senaste: ${lastBp.sys}/${lastBp.dia} · ${prettyDate(lastBp.date)}</p></div>
+          </div>
+          <p class="sub" style="margin-top:.7rem">${bpCat.advice}</p>
+          ${state.logs.bp.length > 1 ? `<div class="bp-spark">${state.logs.bp.slice(-12).map(b => {
+            const c = bpCategory(b.sys, b.dia);
+            return `<span class="bp-dot ${c.cls}" style="height:${Math.max(12, Math.min(52, Math.round((b.sys - 90) * 0.55)))}px" title="${b.sys}/${b.dia} · ${b.date}"></span>`;
+          }).join("")}</div><p class="sub" style="font-size:.78rem;margin-top:.35rem">Senaste ${Math.min(12, state.logs.bp.length)} mätningarna — följ riktningen, inte enstaka värden.</p>` : ""}
+        ` : `<p class="sub" style="margin-top:.5rem">Blodtrycket förutsäger hjärt- och kärlrisk bättre än vågen gör, och det märks inte förrän det är högt. En mätning i veckan räcker.
+          Träning, viktnedgång, promenader, mindre salt och mindre alkohol sänker det mätbart — allt sådant du redan jobbar med här.</p>`}
+      </div>
     </div>`;
 
   const ua = $("#useAdaptive");
@@ -3165,6 +3359,21 @@ function renderMal(wrap) {
     const tw = +String($("#twIn").value).replace(",", ".");
     p.targetWeight = tw || null; save();
     toast("◎", tw ? "Målvikt satt: " + tw + " kg" : "Målvikt borttagen", tw ? "Prognosen visas när vikttrenden har tillräckligt med data." : "");
+    renderMal(wrap);
+  };
+  $("#bpSave").onclick = () => {
+    const sys = Math.round(+$("#bpSys").value), dia = Math.round(+$("#bpDia").value);
+    if (!sys || !dia) { toast("⚠️", "Fyll i båda värdena", "Både över- och undertryck behövs."); return; }
+    if (sys < 60 || sys > 260 || dia < 40 || dia > 160 || dia >= sys) {
+      toast("⚠️", "Kontrollera siffrorna", "Övertrycket ska vara det högre värdet, t.ex. 128/82."); return;
+    }
+    const today = dkey();
+    const ex = state.logs.bp.find(b => b.date === today);
+    if (ex) { ex.sys = sys; ex.dia = dia; } else state.logs.bp.push({ date: today, sys, dia });
+    save();
+    const c = bpCategory(sys, dia);
+    toast(c.cls === "sage" ? "✓" : c.cls === "amber" ? "◎" : "⚠️", "Blodtryck loggat: " + sys + "/" + dia,
+      c.label + ". " + (state.logs.bp.length < 3 ? "Mät några gånger till — enstaka värden svänger mycket." : c.advice));
     renderMal(wrap);
   };
   $("#bodySave").onclick = () => {
