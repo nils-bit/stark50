@@ -580,3 +580,83 @@ a { color: var(--amber); }
   .chip { padding: .6rem 1.2rem; }
   input, select { font-size: 16px; } /* hindrar iOS-zoom vid fokus */
 }
+
+/* ══════════════ VECKOSCHEMA FÖR PASS ══════════════ */
+.sch-days { display: grid; grid-template-columns: repeat(7, 1fr); gap: .35rem; margin-bottom: 1rem; }
+.sch-day {
+  padding: .7rem .1rem; min-width: 0;
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--radius-sm);
+  color: var(--cream-faint); font-family: var(--font-mono); font-size: .82rem; font-weight: 700;
+  cursor: pointer; transition: background .15s, color .15s, border-color .15s;
+}
+.sch-day:hover { border-color: var(--amber); color: var(--cream-dim); }
+.sch-day.on { background: var(--amber); border-color: var(--amber); color: var(--bg-deep); }
+
+.sch-rows { display: grid; gap: .5rem; margin-bottom: 1rem; }
+.sch-row { display: grid; grid-template-columns: 84px 1fr; align-items: center; gap: .7rem; }
+.sch-row-day { font-family: var(--font-mono); font-size: .8rem; color: var(--cream-dim); }
+.sch-row select { width: 100%; }
+
+.sch-foot { display: flex; align-items: flex-end; gap: 1rem; flex-wrap: wrap; padding-top: .3rem; }
+.sch-foot label { font-size: .8rem; color: var(--cream-dim); }
+.sch-foot input#schTime { width: 88px; margin-top: .25rem; }
+.sch-check { display: flex; align-items: center; gap: .45rem; padding-bottom: .7rem; cursor: pointer; }
+.sch-check input { width: auto; margin: 0; accent-color: var(--amber); }
+.sch-foot .btn { margin-left: auto; }
+
+.sch-week { display: grid; grid-template-columns: repeat(7, 1fr); gap: .35rem; margin-top: 1.2rem;
+  padding-top: 1.1rem; border-top: 1px solid var(--line); }
+.sch-cell { display: flex; flex-direction: column; align-items: center; gap: .3rem;
+  padding: .55rem .15rem; border-radius: var(--radius-sm); }
+.sch-cell.today { background: var(--panel-2); }
+.sch-cell-day { font-family: var(--font-mono); font-size: .68rem; color: var(--cream-faint); letter-spacing: .04em; }
+.sch-cell-lbl { font-size: .64rem; color: var(--cream-faint); }
+.sch-mark { font-size: 1.05rem; line-height: 1; }
+.sch-mark.done { color: var(--sage); }
+.sch-mark.plan { color: var(--amber); }
+.sch-mark.missed { color: var(--clay); }
+.sch-mark.rest { color: var(--cream-faint); opacity: .5; }
+
+@media (max-width: 720px) {
+  .sch-row { grid-template-columns: 1fr; gap: .3rem; }
+  .sch-foot .btn { margin-left: 0; width: 100%; }
+  .sch-cell-lbl { font-size: .58rem; }
+}
+
+/* ══════════════ MATFOTO (AI) ══════════════ */
+.ai-loading { display: flex; align-items: center; gap: 1rem; padding: 1.6rem 0 .4rem; }
+.ai-spinner {
+  width: 30px; height: 30px; flex-shrink: 0; border-radius: 50%;
+  border: 3px solid var(--line); border-top-color: var(--amber);
+  animation: ai-spin .8s linear infinite;
+}
+@keyframes ai-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .ai-spinner { animation-duration: 2.4s; } }
+
+.ai-conf { font-family: var(--font-mono); font-size: .72rem; padding: .1rem .45rem;
+  border-radius: 999px; border: 1px solid currentColor; }
+.ai-conf.sage { color: var(--sage); }
+.ai-conf.amber { color: var(--amber-soft); }
+.ai-conf.clay { color: var(--clay); }
+
+.ai-items { display: grid; gap: .5rem; }
+.ai-item {
+  display: grid; grid-template-columns: 1fr 78px 78px 28px; align-items: end; gap: .6rem;
+  padding: .7rem .8rem; background: var(--panel-2); border-radius: var(--radius-sm);
+}
+.ai-item-main { display: flex; flex-direction: column; gap: .15rem; min-width: 0; }
+.ai-item-name { font-weight: 600; overflow-wrap: anywhere; }
+.ai-item-portion { font-size: .78rem; color: var(--cream-faint); font-family: var(--font-mono); }
+.ai-num { display: flex; flex-direction: column; gap: .2rem; font-size: .68rem;
+  color: var(--cream-faint); font-family: var(--font-mono); }
+.ai-num input { padding: .4rem .5rem; text-align: right; }
+.ai-item .mi-del { align-self: center; }
+
+.ai-total { margin-top: 1rem; padding-top: .9rem; border-top: 1px solid var(--line);
+  font-size: 1.05rem; color: var(--amber-soft); }
+.ai-total .sub { display: inline; font-size: .82rem; color: var(--cream-dim); white-space: nowrap; }
+
+@media (max-width: 620px) {
+  .ai-item { grid-template-columns: 1fr 64px 64px 24px; gap: .4rem; padding: .6rem; }
+  .ai-num input { padding: .35rem .3rem; }
+}
