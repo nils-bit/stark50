@@ -195,6 +195,91 @@ const GOAL_META = {
     desc: "Starkare, rörligare och piggare i vardagen. Styrka, kondition och återhämtning i lagom dos." },
 };
 
+/* ─────────────── TRÄNINGSINRIKTNING ───────────────
+   `goal` ovan styr KOSTEN (kalorier och protein). `discipline` här styr
+   TRÄNINGEN. Det är två olika frågor som tidigare delade nyckel — man kan
+   mycket väl köra Hyrox i kaloriunderskott. "allman" betyder uttryckligen
+   "slå upp passmallar på goal som förut", så befintliga användare får
+   oförändrat beteende. */
+const DISC_META = {
+  allman: {
+    label: "Allmän hälsa & styrka", tag: "Balanserat", ico: "❖",
+    desc: "Styrka, kondition och rörlighet i lagom dos — byggt för att du ska må bra i vardagen och hålla i trettio år till. Inga tävlingsmoment.",
+    reality: "3 pass i veckan räcker gott.",
+  },
+  styrka: {
+    label: "Styrka & powerlifting", tag: "Tunga lyft", ico: "▲",
+    desc: "Knäböj, bänkpress och marklyft som grund, med accessoarer runt omkring. Låga reps, tunga vikter och gott om vila mellan seten.",
+    reality: "Bäst dokumenterade träningen för muskelmassa och bentäthet efter 50 — men den kräver att du tar tekniken på allvar.",
+  },
+  hyrox: {
+    label: "Hyrox & hybridträning", tag: "Löpning + stationer", ico: "◆",
+    desc: "8 × 1 km löpning varvat med släde, rodd, ski erg, farmers carry, wall balls och lunges. Vi tränar både momenten och konsten att springa på trötta ben.",
+    reality: "Har egna åldersklasser och låg teknisk tröskel. Löpvolymen är den nya belastningen — appen ökar den varannan vecka, inte varje.",
+  },
+};
+
+/* Startpass per inriktning. `allman` saknas medvetet — den faller tillbaka på
+   TEMPLATES[goal] via templatesFor(), vilket bevarar dagens beteende exakt. */
+const DISC_TEMPLATES = {
+  styrka: [
+    { name: "Pass A — Knäböj", focus: "Ben · Bål", exercises: [
+      { name: "Knäböj med skivstång", sets: 4, reps: "5" },
+      { name: "Rumänska marklyft", sets: 3, reps: "8" },
+      { name: "Bulgarian split squat", sets: 3, reps: "8/ben" },
+      { name: "Hängande benlyft", sets: 3, reps: "10" },
+      { name: "Pallof press", sets: 3, reps: "10/sida" } ] },
+    { name: "Pass B — Bänkpress", focus: "Bröst · Axlar · Triceps", exercises: [
+      { name: "Bänkpress", sets: 4, reps: "5" },
+      { name: "Militärpress", sets: 3, reps: "6–8" },
+      { name: "Hantelrodd", sets: 3, reps: "8/arm" },
+      { name: "Triceps pushdown", sets: 3, reps: "10–12" },
+      { name: "Face pulls", sets: 3, reps: "15" } ] },
+    { name: "Pass C — Marklyft", focus: "Rygg · Baksida · Grepp", exercises: [
+      { name: "Marklyft", sets: 4, reps: "4–5" },
+      { name: "Frontböj", sets: 3, reps: "6" },
+      { name: "Latsdrag", sets: 3, reps: "8–10" },
+      { name: "Farmers walk", sets: 3, reps: "40 m" },
+      { name: "Plankan", sets: 3, reps: "45 sek" } ] },
+  ],
+  hyrox: [
+    { name: "Pass A — Stationer & styrka", focus: "Släde · Bär · Ben", exercises: [
+      { name: "Slädpush", sets: 4, reps: "25 m" },
+      { name: "Slädpull", sets: 4, reps: "25 m" },
+      { name: "Wall balls", sets: 4, reps: "20" },
+      { name: "Farmers walk", sets: 3, reps: "50 m" },
+      { name: "Sandbag lunges", sets: 3, reps: "20 m" } ] },
+    { name: "Pass B — Kompromissad löpning", focus: "Löpning direkt efter station", exercises: [
+      { name: "Uppvärmning lugn löpning", sets: 1, reps: "10 min" },
+      { name: "Löpning 1 km", sets: 4, reps: "tävlingsfart" },
+      { name: "Roddmaskin 500 m", sets: 4, reps: "mellan varje km" },
+      { name: "Nedvarvning", sets: 1, reps: "5 min" } ] },
+    { name: "Pass C — Erg & bål", focus: "Rodd · Ski erg · Core", exercises: [
+      { name: "Roddmaskin — intervaller", sets: 5, reps: "500 m" },
+      { name: "Ski erg — intervaller", sets: 5, reps: "500 m" },
+      { name: "Burpee broad jumps", sets: 3, reps: "10" },
+      { name: "Hängande benlyft", sets: 3, reps: "12" },
+      { name: "Sidoplanka", sets: 3, reps: "40 sek/sida" } ] },
+  ],
+};
+
+/* ─────────────── BLOCKMODELL ───────────────
+   Rullande 4-veckorsblock: tre uppbyggande veckor plus en deload. Deloaden är
+   inte en viloperiod utan en del av programmet — det är där superkompensationen
+   sker, och den blir viktigare ju äldre man är. */
+const BLOCK_WEEKS = [
+  { n: 1, name: "Uppbyggnad", vol: 1.0, setAdj: 0, rpe: "RPE 7", runVol: 1.0,
+    note: "Lägg grunden. Håll ett par repetitioner i tanken på varje set — det ska kännas kontrollerat." },
+  { n: 2, name: "Belastning", vol: 1.1, setAdj: 1, rpe: "RPE 8", runVol: 1.1,
+    note: "Ett set till per övning. Nu ska det börja kosta, men du ska fortfarande klara alla repetitioner." },
+  { n: 3, name: "Topp", vol: 1.0, setAdj: 0, rpe: "RPE 8–9", runVol: 1.1,
+    note: "Blockets tyngsta vecka. Gå nära gränsen på sista setet — men aldrig till total utmattning." },
+  { n: 4, name: "Deload", vol: 0.55, setAdj: -1, rpe: "RPE 6", runVol: 0.6,
+    note: "Halva volymen och lätta vikter. Hoppa inte över den här veckan — det är nu kroppen bygger tillbaka det du slitit ner." },
+];
+const BLOCK_LEN = BLOCK_WEEKS.length;
+const ABSENCE_DAYS = 10; // längre uppehåll än så → blocket ankras om till vecka 1
+
 const RELAX_TIPS = [
   { t: "10 minuter innan skärmen släcks", d: "Lägg mobilen i ett annat rum 30 min före läggdags. Blått ljus trycker ner melatoninet — särskilt känsligt efter 50." },
   { t: "Kaffestopp klockan 14", d: "Koffein har en halveringstid på 5–6 timmar. En kopp kl 16 = en halv kopp i blodet vid midnatt." },
@@ -213,7 +298,7 @@ let state = load();
 function defaultState() {
   return {
     onboarded: false,
-    profile: { name: "", age: 52, height: 180, weight: 88, activity: 1.375, trainingDays: 3, goal: "halsa", walksPerDay: 1, pace: "medel", targetWeight: null },
+    profile: { name: "", age: 52, height: 180, weight: 88, activity: 1.375, trainingDays: 3, goal: "halsa", discipline: "allman", walksPerDay: 1, pace: "medel", targetWeight: null },
     targets: {},
     prefs: { avoid: [], vego: false },
     favs: [],            // favoritmarkerade recept-id:n
@@ -228,6 +313,7 @@ function defaultState() {
     dagsformLog: {},     // { "YYYY-MM-DD": score } — historik för trendgrafen
     genPrefs: null,      // passgeneratorns senaste val { time, eq, focus }
     schedule: { days: {}, time: "17:00", remind: true }, // veckoschema: { 1: "wid" | "auto", ... } (0=sön)
+    program: { start: null, block: 1 }, // rullande 4-veckorsblock; start = måndagen blocket började
     aiKey: "",           // egen Anthropic-nyckel för matfoto (ligger bara i din webbläsare)
     aiModel: "claude-opus-5",
     shopping: [],        // [{ t, done }]
@@ -246,6 +332,9 @@ function load() {
       if (!s.schedule.days || typeof s.schedule.days !== "object") s.schedule.days = {};
       // En sparad logs ersätter hela standardobjektet, så nya loggtyper måste läggas tillbaka
       s.logs = Object.assign({ meals: {}, walks: [], sessions: [], sleep: [], stress: [], weight: [], water: {}, supps: {}, bp: [] }, s.logs || {});
+      s.program = Object.assign({ start: null, block: 1 }, s.program || {});
+      // Användare som onboardade före inriktningarna kör vidare på målbaserade mallar
+      if (!s.profile.discipline || !DISC_META[s.profile.discipline]) s.profile.discipline = "allman";
       return s;
     }
   } catch (e) { /* korrupt data → börja om */ }
@@ -644,22 +733,93 @@ function overloadNext(name) {
   return pr.full ? Math.round((pr.weight + (pr.weight >= 40 ? 2.5 : 1)) * 2) / 2 : pr.weight;
 }
 
+/* ─────────────── BLOCKBERÄKNING ───────────────
+   Blocket härleds on demand ur `program.start` istället för att materialiseras
+   som sparade veckor — veckoschemat kan ändras när som helst och en sparad plan
+   skulle genast hamna ur synk.
+
+   Frånvaro: ren kalenderförankring har ett tydligt fel — är du borta tre veckor
+   kommer du tillbaka till "vecka 4, deload" utan att ha något att ladda av från.
+   Har inget pass loggats på ABSENCE_DAYS dagar ankras blocket därför om till
+   vecka 1. Det är vad en tränare gör; man kliver inte in i toppveckan efter ett
+   längre uppehåll. */
+function disciplineOf() { return (state.profile && state.profile.discipline) || "allman"; }
+
+function mondayOf(d = new Date()) {
+  const m = new Date(d);
+  m.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+  m.setHours(0, 0, 0, 0);
+  return m;
+}
+
+function lastSessionDate() {
+  const s = state.logs.sessions;
+  return s.length ? s[s.length - 1].date : null;
+}
+
+/* → { block, week, meta, restarted } — restarted är sant den gång vi ankrar om */
+function currentBlock() {
+  const prog = state.program || (state.program = { start: null, block: 1 });
+  const todayMon = mondayOf();
+  let restarted = false;
+
+  if (!prog.start) { prog.start = dkey(todayMon); prog.block = 1; }
+
+  const last = lastSessionDate();
+  if (last) {
+    const gap = Math.floor((fromKey(dkey()) - fromKey(last)) / 86400000);
+    if (gap > ABSENCE_DAYS && dkey(todayMon) !== prog.start) {
+      prog.start = dkey(todayMon); prog.block = 1; restarted = true;
+    }
+  }
+
+  const weeksIn = Math.max(0, Math.floor((todayMon - mondayOf(fromKey(prog.start))) / (7 * 86400000)));
+  const block = prog.block + Math.floor(weeksIn / BLOCK_LEN);
+  const week = (weeksIn % BLOCK_LEN) + 1;
+  return { block, week, meta: BLOCK_WEEKS[week - 1], restarted };
+}
+
+/* Blockveckan för ett godtyckligt datum — används av kalenderexport och vyer */
+function blockWeekOf(dateKey) {
+  const prog = state.program;
+  if (!prog || !prog.start) return BLOCK_WEEKS[0];
+  const weeksIn = Math.floor((mondayOf(fromKey(dateKey)) - mondayOf(fromKey(prog.start))) / (7 * 86400000));
+  return BLOCK_WEEKS[((weeksIn % BLOCK_LEN) + BLOCK_LEN) % BLOCK_LEN];
+}
+
+/* Startpassen: allman behåller målbaserade mallar, övriga får sina egna */
+function templatesFor(profile) {
+  const d = (profile && profile.discipline) || "allman";
+  return DISC_TEMPLATES[d] || TEMPLATES[(profile && profile.goal) || "halsa"];
+}
+
 /* Slumpgenerator med frö — samma frö ger samma pass */
 function makeRng(seed) { let s = seed >>> 0; return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; }
 function pickN(arr, n, rnd) { const a = [...arr], out = []; while (a.length && out.length < n) out.push(a.splice(Math.floor(rnd() * a.length), 1)[0]); return out; }
 
-/* Övningspool med utrustningstaggar: gym ⊃ hantlar ⊃ kroppsvikt */
+/* Övningspool med utrustningstaggar: gym ⊃ hantlar ⊃ kroppsvikt.
+
+   Det valfria `disc`-fältet är en ANNAN axel än `eq`: en släde är inte "mer gym
+   än gym", den är utrustning bara vissa inriktningar tränar med. En övning UTAN
+   `disc` erbjuds alla (dagens beteende, oförändrat); en övning MED `disc`
+   erbjuds bara de inriktningarna. Därmed får en vanlig gymanvändare aldrig
+   slädövningar hen inte kan göra. */
 const EXPOOL = {
   press: [
     { n: "Hantelpress på bänk", eq: "hantlar" }, { n: "Axelpress sittande", eq: "hantlar" },
     { n: "Lutande hantelpress", eq: "hantlar" }, { n: "Bröstpress i maskin", eq: "gym" },
     { n: "Armhävningar (ev. på knä)", eq: "kropp" }, { n: "Pikade armhävningar", eq: "kropp" },
     { n: "Dips mot bänk eller stol", eq: "kropp" },
+    { n: "Bänkpress", eq: "gym", disc: ["styrka", "hyrox"] },
+    { n: "Militärpress", eq: "gym", disc: ["styrka", "hyrox"] },
+    { n: "Lutande bänkpress med skivstång", eq: "gym", disc: ["styrka"] },
   ],
   drag: [
     { n: "Latsdrag", eq: "gym" }, { n: "Sittande rodd", eq: "gym" }, { n: "Face pulls", eq: "gym" },
     { n: "Hantelrodd", eq: "hantlar" }, { n: "Bicepscurl", eq: "hantlar" },
     { n: "Omvänd rodd under bord", eq: "kropp" }, { n: "Supermanlyft", eq: "kropp" },
+    { n: "Skivstångsrodd", eq: "gym", disc: ["styrka", "hyrox"] },
+    { n: "Chins med gummiband", eq: "gym", disc: ["styrka", "hyrox"] },
   ],
   ben: [
     { n: "Benpress", eq: "gym" }, { n: "Vadpress", eq: "gym" },
@@ -667,11 +827,16 @@ const EXPOOL = {
     { n: "Knäböj med kroppsvikt", eq: "kropp" }, { n: "Utfallssteg", eq: "kropp" },
     { n: "Step-ups på bänk", eq: "kropp" }, { n: "Enbens höftlyft", eq: "kropp" },
     { n: "Vadhävningar på trappsteg", eq: "kropp" },
+    { n: "Knäböj med skivstång", eq: "gym", disc: ["styrka", "hyrox"] },
+    { n: "Marklyft", eq: "gym", disc: ["styrka", "hyrox"] },
+    { n: "Frontböj", eq: "gym", disc: ["styrka"] },
+    { n: "Bulgarian split squat", eq: "hantlar", disc: ["styrka", "hyrox"] },
   ],
   core: [
     { n: "Plankan", eq: "kropp" }, { n: "Sidoplanka", eq: "kropp" },
     { n: "Fågelhunden", eq: "kropp" }, { n: "Dead bug", eq: "kropp" },
     { n: "Pallof press", eq: "gym" },
+    { n: "Hängande benlyft", eq: "gym", disc: ["styrka", "hyrox"] },
   ],
   puls: [
     { n: "Roddmaskin — hårt tempo", eq: "gym" }, { n: "Kettlebell swings", eq: "hantlar" },
@@ -683,6 +848,27 @@ const EXPOOL = {
     { n: "Bröstryggsrotation", eq: "kropp" }, { n: "Baksida lår — stretch", eq: "kropp" },
     { n: "Balans på ett ben", eq: "kropp" },
   ],
+  /* Hyrox-stationerna. Alla disc-taggade så de aldrig läcker till andra. */
+  slap: [
+    { n: "Slädpush", eq: "gym", disc: ["hyrox"] },
+    { n: "Slädpull", eq: "gym", disc: ["hyrox"] },
+    { n: "Farmers walk", eq: "hantlar", disc: ["hyrox", "styrka"] },
+    { n: "Sandbag lunges", eq: "gym", disc: ["hyrox"] },
+    { n: "Wall balls", eq: "gym", disc: ["hyrox"] },
+    { n: "Burpee broad jumps", eq: "kropp", disc: ["hyrox"] },
+  ],
+  erg: [
+    { n: "Roddmaskin — intervaller", eq: "gym", disc: ["hyrox"] },
+    { n: "Ski erg — intervaller", eq: "gym", disc: ["hyrox"] },
+    { n: "Roddmaskin — jämnt tempo", eq: "gym", disc: ["hyrox"] },
+    { n: "Ski erg — jämnt tempo", eq: "gym", disc: ["hyrox"] },
+  ],
+  lopning: [
+    { n: "Löpning 1 km i tävlingsfart", eq: "kropp", disc: ["hyrox"] },
+    { n: "Löpning — lugn distans", eq: "kropp", disc: ["hyrox"] },
+    { n: "Löpintervaller 400 m", eq: "kropp", disc: ["hyrox"] },
+    { n: "Kompromissad löpning efter station", eq: "kropp", disc: ["hyrox"] },
+  ],
 };
 
 const FOCUS_SEQ = {
@@ -690,7 +876,49 @@ const FOCUS_SEQ = {
   overkropp: ["press", "drag", "press", "drag", "press", "drag", "core", "press", "drag"],
   underkropp: ["ben", "ben", "core", "ben", "ben", "core", "ben", "ben", "ben"],
   puls: ["puls", "ben", "puls", "core", "puls", "ben", "puls", "core", "puls"],
+  // Styrka: en tung basövning först, sedan accessoarer runt den
+  knaboj: ["ben", "ben", "ben", "core", "drag", "ben", "core", "drag", "core"],
+  bank: ["press", "press", "drag", "press", "drag", "core", "press", "drag", "core"],
+  marklyft: ["ben", "drag", "ben", "drag", "core", "drag", "ben", "core", "drag"],
+  // Hyrox
+  stationer: ["slap", "slap", "ben", "slap", "erg", "slap", "core", "slap", "erg"],
+  erglopning: ["erg", "lopning", "erg", "lopning", "erg", "core", "lopning", "erg", "core"],
+  kompromiss: ["lopning", "slap", "lopning", "slap", "lopning", "erg", "lopning", "slap", "core"],
 };
+
+/* Vilka fokusval som erbjuds per inriktning i passgeneratorn */
+const DISC_FOCUS = {
+  allman: [["auto", "✦ Auto"], ["helkropp", "Helkropp"], ["overkropp", "Överkropp"], ["underkropp", "Underkropp"], ["puls", "Puls & flås"]],
+  styrka: [["auto", "✦ Auto"], ["knaboj", "Knäböj"], ["bank", "Bänk"], ["marklyft", "Marklyft"], ["helkropp", "Helkropp"]],
+  hyrox: [["auto", "✦ Auto"], ["stationer", "Stationer"], ["erglopning", "Erg & löpning"], ["kompromiss", "Kompromissad löpning"], ["helkropp", "Helkropp"]],
+};
+
+/* Repetitioner och belastning per övning.
+
+   PHASES och blockveckan mäter olika saker och samverkar: PHASES är
+   TRÄNINGSÅLDER och fungerar som säkerhetsspärr — en nybörjare i Fas 1 ska
+   aldrig köra tunga treor oavsett var i blocket hen befinner sig. Blockveckan
+   är VAR I MESOCYKELN man är och skalar runt det.
+
+   Belastningen anges i RPE, inte procent av 1RM. Det kräver inget maxtest, och
+   ett maxtest är det farligaste en app utan coach kan be en 52-åring om. */
+const HEAVY_LIFTS = ["Knäböj med skivstång", "Marklyft", "Bänkpress", "Militärpress", "Frontböj", "Skivstångsrodd", "Lutande bänkpress med skivstång"];
+
+function repsFor(cat, ex, ph, blk, disc) {
+  if (cat === "puls") return "40 sek";
+  if (cat === "core") return "30–45 sek";
+  if (cat === "rorlighet") return "45 sek lugnt";
+  if (cat === "erg") return blk.meta.n === 4 ? "3 × 500 m lugnt" : "5 × 500 m";
+  if (cat === "lopning") return blk.meta.n === 4 ? "15 min lugnt" : "4 × 1 km";
+  if (cat === "slap") return blk.meta.n === 4 ? "2 × 25 m lätt" : "4 × 25 m";
+
+  // Tunga basövningar: repschemat följer blockveckan, men bara för den som
+  // hunnit förbi grundfasen. Fas 1 stannar på teknikreps oavsett vecka.
+  if (disc === "styrka" && HEAVY_LIFTS.includes(ex.n) && ph.min >= 12) {
+    return ["5 · RPE 7", "5 · RPE 8", "3 · RPE 8–9", "5 · RPE 6 (lätt)"][blk.meta.n - 1];
+  }
+  return ph.reps;
+}
 
 /* Dynamisk passgenerator: tid × utrustning × fokus × dagsform × vad du körde sist */
 function generateWorkout(opts) {
@@ -698,8 +926,12 @@ function generateWorkout(opts) {
   const rnd = makeRng(seed);
   const ph = currentPhase();
   const goal = state.profile.goal;
+  const disc = disciplineOf();
+  const blk = currentBlock();
   const df = computeDagsform();
   const allowedEq = eq === "gym" ? ["gym", "hantlar", "kropp"] : eq === "hantlar" ? ["hantlar", "kropp"] : ["kropp"];
+  // En övning utan disc-tagg är öppen för alla; med tagg bara för sin inriktning
+  const okDisc = x => !x.disc || x.disc.includes(disc);
   const notes = [];
 
   // Dagsform styr intensiteten
@@ -714,12 +946,22 @@ function generateWorkout(opts) {
   if (df.hasAnyData && df.score < 60) { setAdj = -1; notes.push("Dagsform " + df.score + " — ett set mindre per övning och lite lättare vikter idag."); }
   if (df.hasAnyData && df.score >= 80) notes.push("Toppform (" + df.score + ") — lägg gärna på ett extra set eller kliv upp i vikt på första övningen.");
 
-  // Fokus: auto väljer sekvens efter ditt mål
+  /* Blockveckan modulerar volymen ovanpå dagsformen. Dagsformen är alltid
+     starkast: en tung vecka-3-dag med dagsform 35 blev redan ett
+     återhämtningspass ovan, och en dålig dag drar fortfarande ner ett set. */
+  setAdj += blk.meta.setAdj;
+  notes.push("Block " + blk.block + " · vecka " + blk.week + " av " + BLOCK_LEN + " — " + blk.meta.name + ". " + blk.meta.note);
+  if (blk.restarted) notes.push("Du har varit borta ett tag, så blocket börjar om på uppbyggnad. Kliv in mjukt.");
+
+  // Fokus: auto väljer sekvens efter inriktning (och för allman efter mål, som förut)
   let seqKey = focus;
-  if (focus === "auto") seqKey = goal === "fett" ? "puls" : goal === "muskler" ? "helkropp" : "helkropp";
-  if (focus === "auto" && goal === "fett") seqKey = "helkropp"; // helkropp med pulsinslag nedan
+  if (focus === "auto") {
+    seqKey = disc === "styrka" ? ["knaboj", "bank", "marklyft"][state.logs.sessions.length % 3]
+      : disc === "hyrox" ? ["stationer", "erglopning", "kompromiss"][state.logs.sessions.length % 3]
+      : "helkropp";
+  }
   let seq = [...(FOCUS_SEQ[seqKey] || FOCUS_SEQ.helkropp)];
-  if (focus === "auto" && goal === "fett") { seq[4] = "puls"; seq[7] = "puls"; }
+  if (focus === "auto" && disc === "allman" && goal === "fett") { seq[4] = "puls"; seq[7] = "puls"; }
 
   // Antal övningar efter tid
   const count = time <= 20 ? 4 : time <= 30 ? 6 : time <= 45 ? 8 : 9;
@@ -732,25 +974,33 @@ function generateWorkout(opts) {
 
   const used = new Set();
   const exercises = seq.map(cat => {
-    let pool = EXPOOL[cat].filter(x => allowedEq.includes(x.eq) && !used.has(x.n) && !lastNames.has(x.n));
-    if (!pool.length) pool = EXPOOL[cat].filter(x => allowedEq.includes(x.eq) && !used.has(x.n));
-    if (!pool.length) pool = EXPOOL[cat].filter(x => allowedEq.includes(x.eq));
+    const base = EXPOOL[cat].filter(x => allowedEq.includes(x.eq) && okDisc(x));
+    let pool = base.filter(x => !used.has(x.n) && !lastNames.has(x.n));
+    if (!pool.length) pool = base.filter(x => !used.has(x.n));
+    /* Är allt i kategorin redan använt hoppar vi över platsen istället för att
+       upprepa samma övning. Ett kortare pass är bättre än fem set burpees i rad
+       — det inträffar bara i smala kombinationer (t.ex. Hyrox utan utrustning). */
+    if (!pool.length) return null;
     const x = pool[Math.floor(rnd() * pool.length)];
     used.add(x.n);
     const isTimed = cat === "core" || cat === "puls" || cat === "rorlighet";
     return {
       name: x.n,
       sets: Math.max(2, (isTimed ? 3 : ph.sets) + (isTimed ? 0 : setAdj)),
-      reps: cat === "puls" ? "40 sek" : cat === "core" ? "30–45 sek" : ph.reps,
+      reps: repsFor(cat, x, ph, blk, disc),
     };
-  });
+  }).filter(Boolean);
 
-  const focusLabels = { auto: "Auto — " + GOAL_META[goal].label, helkropp: "Helkropp", overkropp: "Överkropp", underkropp: "Underkropp", puls: "Puls & flås" };
+  const focusLabels = {
+    auto: "Auto — " + DISC_META[disc].label, helkropp: "Helkropp", overkropp: "Överkropp",
+    underkropp: "Underkropp", puls: "Puls & flås", knaboj: "Knäböj", bank: "Bänk",
+    marklyft: "Marklyft", stationer: "Stationer", erglopning: "Erg & löpning", kompromiss: "Kompromissad löpning",
+  };
   const eqLabels = { gym: "gym", hantlar: "hantlar", kropp: "kroppsvikt" };
   return {
     id: "gen" + seed, custom: true,
-    name: (focus === "auto" ? "Dagens pass" : focusLabels[focus]) + " · " + time + " min",
-    focus: focusLabels[focus] + " · " + eqLabels[eq] + " · " + ph.name,
+    name: (focus === "auto" ? "Dagens pass" : focusLabels[focus] || "Pass") + " · " + time + " min",
+    focus: (focusLabels[focus] || "Pass") + " · " + eqLabels[eq] + " · v" + blk.week + " " + blk.meta.name,
     exercises, note: notes.join(" "),
   };
 }
@@ -1194,7 +1444,7 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden) chec
 /* ═══════════════ ONBOARDING ═══════════════ */
 
 let ob = { step: 0, draft: null, tmpWorkouts: [] };
-const OB_STEPS = 9;
+const OB_STEPS = 10;
 
 function startOnboarding(existing) {
   ob.step = 0;
@@ -1217,7 +1467,7 @@ function obProgress() {
 function renderOb() {
   const el = $("#obInner");
   const d = ob.draft;
-  const steps = [obHero, obYou, obGoal, obHabits, obPrefs, obWorkouts, obReminders, obDevices, obSummary];
+  const steps = [obHero, obYou, obGoal, obDiscipline, obHabits, obPrefs, obWorkouts, obReminders, obDevices, obSummary];
   el.innerHTML = "";
   el.appendChild(steps[ob.step]());
   el.scrollTop = 0; window.scrollTo(0, 0);
@@ -1253,7 +1503,7 @@ function obYou() {
   const d = ob.draft;
   const el = obStepEl(`
     ${obProgress()}
-    <div class="ob-kicker">Steg 1 av 8</div>
+    <div class="ob-kicker">Steg 1 av 9</div>
     <h2 class="ob-title">Vem är <em>du</em>?</h2>
     <p class="ob-lead">Uppgifterna används bara för att räkna ut dina kalori- och proteinmål. Allt stannar i din webbläsare.</p>
     <div class="ob-grid">
@@ -1282,7 +1532,7 @@ function obGoal() {
   const d = ob.draft;
   const el = obStepEl(`
     ${obProgress()}
-    <div class="ob-kicker">Steg 2 av 8</div>
+    <div class="ob-kicker">Steg 2 av 9</div>
     <h2 class="ob-title">Vad vill du <em>uppnå</em>?</h2>
     <p class="ob-lead">Ditt val styr träningspassen, kalorimålet och proteinnivån. Du kan byta när som helst.</p>
     <div class="goal-cards">
@@ -1324,7 +1574,44 @@ function obGoal() {
   return el;
 }
 
-/* Steg 3 — Vanor */
+/* Steg 3 — Träningsinriktning.
+   Måste ligga FÖRE obHabits, som är där startpassen faktiskt skapas. */
+function obDiscipline() {
+  const d = ob.draft;
+  if (!d.discipline) d.discipline = "allman"; // användare från före inriktningarna
+  const el = obStepEl(`
+    ${obProgress()}
+    <div class="ob-kicker">Steg 3 av 9</div>
+    <h1 class="ob-title">Vad tränar du <em>mot</em>?</h1>
+    <p class="ob-lead">Det här styr vilka pass du får och hur programmet byggs upp över tid — inte hur du äter.
+    Kosten följer målet du just valde, så du kan mycket väl köra Hyrox i underskott.</p>
+    <div class="goal-cards">
+      ${Object.entries(DISC_META).map(([k, m]) => `
+        <button class="goal-card ${d.discipline === k ? "selected" : ""}" data-disc="${k}">
+          <div class="gc-ico">${m.ico}</div>
+          <div><h3>${m.label}</h3><p>${m.desc}</p>
+            <p style="margin-top:.5rem;color:var(--cream-faint);font-size:.9rem">${m.reality}</p>
+            <span class="gc-tag">${m.tag}</span></div>
+        </button>`).join("")}
+    </div>
+    <p class="sub" style="margin-top:1.2rem">Oavsett vad du väljer bygger appen ett rullande fyraveckorsblock: tre veckor som trappar upp och en lättare vecka som låter kroppen bygga tillbaka. Du kan byta inriktning när du vill under Inställningar.</p>
+    <div class="ob-nav">
+      <button class="btn ghost" id="obB">← Tillbaka</button>
+      <button class="btn" id="obN">Fortsätt →</button>
+    </div>`);
+  $$(".goal-card", el).forEach(b => b.onclick = () => {
+    d.discipline = b.dataset.disc;
+    $$(".goal-card", el).forEach(x => x.classList.toggle("selected", x === b));
+  });
+  $("#obB", el).onclick = obBack;
+  $("#obN", el).onclick = () => {
+    ob.tmpWorkouts = null; // ny inriktning → nya startpass i nästa steg
+    obNext();
+  };
+  return el;
+}
+
+/* Steg 4 — Vanor */
 function obHabits() {
   const d = ob.draft;
   const acts = [
@@ -1335,7 +1622,7 @@ function obHabits() {
   ];
   const el = obStepEl(`
     ${obProgress()}
-    <div class="ob-kicker">Steg 3 av 8</div>
+    <div class="ob-kicker">Steg 4 av 9</div>
     <h2 class="ob-title">Din <em>vardag</em></h2>
     <p class="ob-lead">Hur många pass i veckan är realistiskt — inte i bästa fall, utan en vanlig vecka?</p>
     <label>Träningspass per vecka</label>
@@ -1372,7 +1659,7 @@ function obHabits() {
   });
   $("#obB", el).onclick = obBack;
   $("#obN", el).onclick = () => {
-    if (!ob.tmpWorkouts) ob.tmpWorkouts = TEMPLATES[d.goal].map((w, i) => ({ id: "w" + Date.now() + i, custom: false, ...JSON.parse(JSON.stringify(w)) }));
+    if (!ob.tmpWorkouts) ob.tmpWorkouts = templatesFor(d).map((w, i) => ({ id: "w" + Date.now() + i, custom: false, ...JSON.parse(JSON.stringify(w)) }));
     ob.tmpReminders.walks = WALK_DEFAULTS[Math.min(d.walksPerDay || 1, 3)];
     obNext();
   };
@@ -1386,7 +1673,7 @@ function obPrefs() {
   const p = ob.tmpPrefs;
   const el = obStepEl(`
     ${obProgress()}
-    <div class="ob-kicker">Steg 4 av 8</div>
+    <div class="ob-kicker">Steg 5 av 9</div>
     <h2 class="ob-title">Vad vill du <em>inte</em> äta?</h2>
     <p class="ob-lead">Markera det du undviker — receptförslag, matsedel och inköpslista anpassas efter dina val.</p>
     <label>Jag undviker</label>
@@ -1416,7 +1703,7 @@ function obPrefs() {
 function obDevices() {
   const el = obStepEl(`
     ${obProgress()}
-    <div class="ob-kicker">Steg 7 av 8</div>
+    <div class="ob-kicker">Steg 8 av 9</div>
     <h2 class="ob-title">Dina <em>enheter</em></h2>
     <p class="ob-lead">Har du en klocka, ring eller hälsoapp? Markera dem så får du en plats på översikten för steg, vilopuls och sömn.</p>
     <div class="chip-row" id="obDev" style="margin-bottom:1.4rem">
@@ -1442,7 +1729,7 @@ function obDevices() {
 function obWorkouts() {
   const el = obStepEl(`
     ${obProgress()}
-    <div class="ob-kicker">Steg 5 av 8</div>
+    <div class="ob-kicker">Steg 6 av 9</div>
     <h2 class="ob-title">Dina <em>träningspass</em></h2>
     <p class="ob-lead">Vi har satt ihop pass utifrån ditt mål — skonsamma för leder men tuffa nog att ge resultat.
     Redigera dem, släng dem eller bygg helt egna.</p>
@@ -1460,6 +1747,9 @@ function obWorkouts() {
 }
 
 function renderWkList(container) {
+  // Listan kan nås innan passen hunnit skapas (t.ex. om man backar i flödet)
+  if (!ob.tmpWorkouts) ob.tmpWorkouts = templatesFor(ob.draft).map((w, i) =>
+    ({ id: "w" + Date.now() + i, custom: false, ...JSON.parse(JSON.stringify(w)) }));
   container.innerHTML = ob.tmpWorkouts.map((w, i) => `
     <div class="wk-card">
       <div class="wk-card-head"><h3>${esc(w.name)}</h3><span class="wk-focus">${esc(w.focus || (w.custom ? "Eget pass" : ""))}</span></div>
@@ -1537,7 +1827,7 @@ function obReminders() {
   const walkOpts = ["08:00", "10:00", "12:30", "15:00", "18:00"];
   const el = obStepEl(`
     ${obProgress()}
-    <div class="ob-kicker">Steg 6 av 8</div>
+    <div class="ob-kicker">Steg 7 av 9</div>
     <h2 class="ob-title">Puffar under <em>dagen</em></h2>
     <p class="ob-lead">Appen påminner dig medan den är öppen i en flik — promenader, vatten och nedvarvning inför natten.</p>
     <label>När vill du bli påmind om promenad?</label>
@@ -1629,6 +1919,8 @@ function obSummary() {
     suggestScheduleDays(d.trainingDays).forEach((dow, i) => {
       state.schedule.days[dow] = state.workouts.length ? state.workouts[i % state.workouts.length].id : "auto";
     });
+    // Blocket startar den här veckan
+    state.program = { start: dkey(mondayOf()), block: 1 };
     state.onboarded = true;
     save();
     $("#onboarding").classList.add("hidden");
@@ -2532,13 +2824,27 @@ function renderTraning(wrap) {
   const deloadSoon = total >= 16 && sinceDeload >= 16;
   const schDays = scheduleDays();
   const schConflicts = recoveryConflicts();
+  const disc = disciplineOf();
+  const blk = currentBlock();
+  save(); // currentBlock kan ha ankrat om programmet
 
   wrap.innerHTML = `
     <div class="card accent" style="margin-bottom:1.2rem;display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap">
       <div>
-        <div class="card-kicker">Din utveckling · ${total} pass totalt</div>
+        <div class="card-kicker">${DISC_META[disc].label} · ${total} pass totalt</div>
         <h2>${ph.name} <span style="font-family:var(--font-mono);font-size:.85rem;color:var(--amber-soft)">· ${ph.sub}</span></h2>
         <p class="sub">${ph.note}${toNext ? " Nästa fas om " + toNext + " pass." : " Du är i högsta fasen — fortsätt öka vikterna stegvis."}</p>
+        <div class="blk">
+          <div class="blk-head">
+            <span class="blk-name">Block ${blk.block} · vecka ${blk.week} — ${blk.meta.name}</span>
+            <span class="blk-rpe">${blk.meta.rpe}</span>
+          </div>
+          <div class="blk-dots">
+            ${BLOCK_WEEKS.map(w => `<span class="blk-dot ${w.n === blk.week ? "now" : w.n < blk.week ? "done" : ""} ${w.n === 4 ? "deload" : ""}" title="Vecka ${w.n} — ${w.name}"></span>`).join("")}
+          </div>
+          <p class="sub" style="font-size:.85rem;margin-top:.5rem">${blk.meta.note}</p>
+          ${blk.restarted ? `<p class="sub" style="font-size:.85rem;margin-top:.4rem;color:var(--amber-soft)">Du har varit borta över ${ABSENCE_DAYS} dagar, så blocket har börjat om på uppbyggnad.</p>` : ""}
+        </div>
         ${deloadSoon ? `<p class="sub" style="margin-top:.5rem;color:var(--amber-soft)"><b>💤 Dags för en deload snart.</b> Efter ~6–8 veckor mår kroppen bra av en lättare vecka: sänk vikterna 40 % och kör som vanligt. Extra viktigt när man passerat 50.</p>` : ""}
       </div>
       <button class="btn" id="rndWk">⚡ Generera dagens pass</button>
@@ -2673,12 +2979,17 @@ function renderTraning(wrap) {
 /* Passgenerator — välj tid, utrustning och fokus; dagsformen vägs in automatiskt */
 function openWorkoutGen() {
   const prefs = state.genPrefs || { time: 45, eq: "gym", focus: "auto" };
+  const gDisc = disciplineOf();
+  // Ett sparat fokusval från en annan inriktning finns inte i den här listan
+  if (!DISC_FOCUS[gDisc].some(([v]) => v === prefs.focus)) prefs.focus = "auto";
+  const gBlk = currentBlock();
   const df = computeDagsform();
   const chip = (group, val, label, sel) => `<button class="chip ${sel ? "selected" : ""}" data-g="${group}" data-v="${val}">${label}</button>`;
   openModal(`
     <div class="card-kicker">⚡ Passgenerator</div>
     <h2>Skräddarsy dagens pass</h2>
-    ${df.hasAnyData ? `<p class="sub" style="margin:.4rem 0 1.1rem">Dagsform just nu: <b style="color:${df.color}">${df.ico} ${df.score} — ${df.label}</b>. Generatorn anpassar volymen därefter.</p>` : `<p class="sub" style="margin:.4rem 0 1.1rem">Ingen dagsform synkad — passet genereras med normal volym.</p>`}
+    <p class="sub" style="margin:.4rem 0 .6rem">Block ${gBlk.block} · vecka ${gBlk.week} av ${BLOCK_LEN} — <b style="color:var(--amber-soft)">${gBlk.meta.name}</b>, ${gBlk.meta.rpe}.</p>
+    ${df.hasAnyData ? `<p class="sub" style="margin:0 0 1.1rem">Dagsform just nu: <b style="color:${df.color}">${df.ico} ${df.score} — ${df.label}</b>. Dagsformen går före blocket — är den låg blir passet lättare oavsett vecka.</p>` : `<p class="sub" style="margin:0 0 1.1rem">Ingen dagsform synkad — passet genereras med blockveckans volym.</p>`}
     <label>Hur mycket tid har du?</label>
     <div class="chip-row" style="margin-bottom:1.1rem">
       ${[20, 30, 45, 60].map(t => chip("time", t, t + " min", prefs.time === t)).join("")}
@@ -2689,13 +3000,9 @@ function openWorkoutGen() {
       ${chip("eq", "hantlar", "Hantlar hemma", prefs.eq === "hantlar")}
       ${chip("eq", "kropp", "Ingen utrustning", prefs.eq === "kropp")}
     </div>
-    <label>Fokus</label>
+    <label>Fokus — ${DISC_META[gDisc].label}</label>
     <div class="chip-row" style="margin-bottom:1.4rem">
-      ${chip("focus", "auto", "✦ Auto (ditt mål)", prefs.focus === "auto")}
-      ${chip("focus", "helkropp", "Helkropp", prefs.focus === "helkropp")}
-      ${chip("focus", "overkropp", "Överkropp", prefs.focus === "overkropp")}
-      ${chip("focus", "underkropp", "Underkropp", prefs.focus === "underkropp")}
-      ${chip("focus", "puls", "Puls & flås", prefs.focus === "puls")}
+      ${DISC_FOCUS[gDisc].map(([v, l]) => chip("focus", v, l, prefs.focus === v)).join("")}
     </div>
     <div class="ob-nav" style="margin-top:0"><button class="btn" id="wgGen">⚡ Generera pass</button></div>`);
   $$("[data-g]").forEach(c => c.onclick = () => {
@@ -3405,6 +3712,9 @@ function renderInstallningar(wrap) {
         <div><label>Mål</label><select id="sGoal">
           ${Object.entries(GOAL_META).map(([k, g]) => `<option value="${k}" ${p.goal === k ? "selected" : ""}>${g.label}</option>`).join("")}
         </select></div>
+        <div><label>Träningsinriktning</label><select id="sDisc">
+          ${Object.entries(DISC_META).map(([k, m]) => `<option value="${k}" ${(p.discipline || "allman") === k ? "selected" : ""}>${m.label}</option>`).join("")}
+        </select></div>
         <div><label>Pass / vecka</label><select id="sDays">${[2, 3, 4, 5, 6].map(n => `<option ${p.trainingDays === n ? "selected" : ""}>${n}</option>`).join("")}</select></div>
         <div><label>Powerwalks / dag</label><select id="sWpd">${[1, 2, 3].map(n => `<option value="${n}" ${(p.walksPerDay || 1) === n ? "selected" : ""}>${n === 3 ? "3 eller fler" : n}</option>`).join("")}</select></div>
       </div>
@@ -3518,6 +3828,15 @@ function renderInstallningar(wrap) {
     p.weight = +$("#sWeight").value || p.weight;
     p.goal = $("#sGoal").value;
     p.trainingDays = +$("#sDays").value;
+    // Byte av inriktning startar ett nytt block — annars hamnar man mitt i en
+    // deload på ett program man precis bytt bort
+    const newDisc = $("#sDisc").value;
+    if (newDisc !== (p.discipline || "allman")) {
+      p.discipline = newDisc;
+      state.program = { start: dkey(mondayOf()), block: 1 };
+      toast(DISC_META[newDisc].ico, "Inriktning: " + DISC_META[newDisc].label,
+        "Ett nytt block startar den här veckan. Dina sparade pass ligger kvar — generera nya under Träning när du vill.");
+    }
     p.walksPerDay = +$("#sWpd").value;
     state.targets = calcTargets(p);
     save();

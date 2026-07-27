@@ -721,3 +721,21 @@ a { color: var(--amber); }
 }
 .sch-warn-ico { flex-shrink: 0; }
 .sch-warn b { color: var(--amber-soft); }
+
+/* ══════════════ BLOCKINDIKATOR ══════════════ */
+.blk { margin-top: 1rem; padding-top: .9rem; border-top: 1px solid var(--line); }
+.blk-head { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; flex-wrap: wrap; }
+.blk-name { font-family: var(--font-mono); font-size: .82rem; color: var(--cream); letter-spacing: .02em; }
+.blk-rpe { font-family: var(--font-mono); font-size: .74rem; color: var(--amber-soft); }
+.blk-dots { display: flex; gap: .3rem; margin-top: .5rem; }
+.blk-dot {
+  flex: 1; height: 5px; border-radius: 3px; background: var(--line);
+  transition: background .2s;
+}
+.blk-dot.done { background: var(--sage); }
+.blk-dot.now { background: var(--amber); }
+/* Deloadveckan markeras även när den ligger framåt — den ska synas som en del
+   av planen, inte som något man råkar hamna i */
+.blk-dot.deload { background: repeating-linear-gradient(90deg, var(--line) 0 4px, transparent 4px 7px); }
+.blk-dot.deload.now { background: repeating-linear-gradient(90deg, var(--sage) 0 4px, transparent 4px 7px); }
+.blk-dot.deload.done { background: repeating-linear-gradient(90deg, var(--sage) 0 4px, transparent 4px 7px); opacity: .5; }
