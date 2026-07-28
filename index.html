@@ -14,7 +14,12 @@
 <link rel="icon" type="image/png" href="icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700;9..144,900&family=Karla:wght@400;500;600;700&family=Spline+Sans+Mono:wght@500;700&display=swap" rel="stylesheet">
+<!-- Typsnitten laddas utan att blockera: en vanlig stylesheet-länk håller tillbaka
+     app.js tills Google svarat, och på dåligt nät blir appen då en tom skärm i
+     flera sekunder. media="print" gör länken oblockerande; onload växlar den till
+     att gälla på riktigt. Fallback-typsnitten i styles.css visas under tiden. -->
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700;9..144,900&family=Karla:wght@400;500;600;700&family=Spline+Sans+Mono:wght@500;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+<noscript><link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700;9..144,900&family=Karla:wght@400;500;600;700&family=Spline+Sans+Mono:wght@500;700&display=swap" rel="stylesheet"></noscript>
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -63,7 +68,23 @@
 <script src="app.js"></script>
 <script>
   if ("serviceWorker" in navigator) {
-    window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+    window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").then(reg => {
+      if (!reg) return;
+      // En hemskärms-PWA "startar" genom att bli synlig igen. Det är då vi vill
+      // fråga efter ny kod — Safari gör det annars som mest en gång per dygn.
+      const check = () => reg.update().catch(() => {});
+      document.addEventListener("visibilitychange", () => { if (!document.hidden) check(); });
+      check();
+      // Ny version färdiginstallerad bredvid den som kör: säg till, ladda inte om
+      // under fingrarna på någon som loggar set mitt i ett pass.
+      reg.addEventListener("updatefound", () => {
+        const sw = reg.installing;
+        if (!sw) return;
+        sw.addEventListener("statechange", () => {
+          if (sw.state === "installed" && navigator.serviceWorker.controller && window.onAppUpdate) window.onAppUpdate();
+        });
+      });
+    }).catch(() => {}));
   }
 </script>
 </body>
