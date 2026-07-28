@@ -1422,6 +1422,32 @@ function toast(ico, title, body, ms = 9000) {
   $(".t-close", el).onclick = () => el.remove();
   $("#toasts").appendChild(el);
   if (ms) setTimeout(() => el.remove(), ms);
+  return el;
+}
+
+/* Service workern har installerat en ny version bredvid den som kör. Ladda inte
+   om automatiskt — står man mitt i ett pass och loggar set är det tvärtemot vad
+   man vill. Erbjud omladdningen istället; nästa start tar den nya versionen ändå. */
+window.onAppUpdate = () => {
+  if (window.__updateShown) return;
+  window.__updateShown = true;
+  const el = toast("⬆️", "Ny version av STARK50", "Tryck här för att ladda om och köra den senaste.", 0);
+  el.style.cursor = "pointer";
+  el.onclick = e => { if (!e.target.classList.contains("t-close")) location.reload(); };
+};
+
+/* Vilken version som faktiskt kör — sw.js äger strängen och svarar på förfrågan.
+   Det är det enda sättet att se med egna ögon att en uppdatering nått telefonen. */
+function swVersion() {
+  return new Promise(resolve => {
+    const sw = navigator.serviceWorker && navigator.serviceWorker.controller;
+    if (!sw) return resolve(null);
+    const ch = new MessageChannel();
+    const timer = setTimeout(() => resolve(null), 1500);
+    ch.port1.onmessage = e => { clearTimeout(timer); resolve(e.data); };
+    try { sw.postMessage({ type: "version" }, [ch.port2]); }
+    catch (e) { clearTimeout(timer); resolve(null); }
+  });
 }
 /* Systemnotis via service workern. iOS (och Chrome på Android) stöder INTE
    `new Notification(...)` — bara registration.showNotification(). Konstruktorn
@@ -3871,7 +3897,15 @@ function renderInstallningar(wrap) {
       </div>
       <p class="sub" style="margin-top:.8rem;font-size:.82rem">Kör du appen på både dator och mobil? Exportera på den ena, importera på den andra — så följer allt med.</p>
       ${state.aiKey ? `<p class="sub" style="margin-top:.5rem;font-size:.82rem;color:var(--amber-soft)">⚠️ Din API-nyckel följer med i exportfilen. Dela den inte vidare.</p>` : ""}
+      <p class="sub" id="sVersion" style="margin-top:.8rem;font-size:.78rem;font-family:var(--font-mono)">Version: kontrollerar…</p>
     </div>`;
+
+  swVersion().then(v => {
+    const el = $("#sVersion");
+    if (!el) return;
+    el.textContent = v ? "Version: " + v.cache + " · " + v.built
+      : "Version: ingen service worker aktiv (appen körs direkt från nätet)";
+  });
 
   $$("#sAvoid .chip").forEach(c => c.onclick = () => {
     const t = c.dataset.t;
