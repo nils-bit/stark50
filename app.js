@@ -293,7 +293,9 @@ const RELAX_TIPS = [
 /* ─────────────── STATE ─────────────── */
 const STORE_KEY = "stark50_v1";
 
-let state = load();
+/* Deklareras här men laddas först i init() — normalizeState() slår upp värden i
+   tabeller (GOAL_META, PACES …) som deklareras längre ner i filen. */
+let state;
 
 function defaultState() {
   return {
@@ -322,23 +324,76 @@ function defaultState() {
     fired: { date: "", keys: [] },
   };
 }
+/* Yttergränser för profilvärden. Onboardingen och inställningarna är strängare
+   (se PROFILE_LIMITS) — det här är bara sanity: utanför dessa blir kaloriberäkningen
+   meningslös eller negativ. */
+const PROFILE_SANE = { age: [18, 110], height: [100, 250], weight: [30, 300] };
+/* Vad man får skriva in i formulären — onboardingen och inställningarna delar dessa */
+const PROFILE_LIMITS = { age: [35, 90], height: [140, 220], weight: [45, 220] };
+const clampTo = (v, [lo, hi], fallback) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : fallback;
+};
+/* Set måste vara ett heltal 1–10: Array(3.5) och Array(-2) kastar RangeError */
+const clampSets = v => Math.min(10, Math.max(1, Math.round(Number(v)) || 3));
+
+/* Gör ett rått objekt användbart som state: fyller i nycklar som saknas i äldre
+   sparningar och ersätter värden som skulle krascha renderingen.
+   Anropas från BÅDA vägarna in i state — load() och importen. Att de tidigare
+   hade varsin kopia av logiken var orsaken till att en gammal backup kunde låsa
+   appen i vit skärm. */
+function normalizeState(raw) {
+  const d = defaultState();
+  const s = Object.assign(d, raw && typeof raw === "object" ? raw : {});
+
+  // Object.assign är ytlig — nya nycklar inuti gamla objekt måste fyllas i här
+  s.profile = Object.assign(defaultState().profile, s.profile && typeof s.profile === "object" ? s.profile : {});
+  s.schedule = Object.assign({ days: {}, time: "17:00", remind: true }, s.schedule && typeof s.schedule === "object" ? s.schedule : {});
+  if (!s.schedule.days || typeof s.schedule.days !== "object") s.schedule.days = {};
+  // En sparad logs ersätter hela standardobjektet, så nya loggtyper måste läggas tillbaka
+  s.logs = Object.assign(defaultState().logs, s.logs && typeof s.logs === "object" ? s.logs : {});
+  for (const k of ["meals", "water", "supps"]) if (!s.logs[k] || typeof s.logs[k] !== "object") s.logs[k] = {};
+  for (const k of ["walks", "sessions", "sleep", "stress", "weight", "bp"]) if (!Array.isArray(s.logs[k])) s.logs[k] = [];
+  for (const k of ["favs", "customRecipes", "body", "workouts", "shopping", "devices"]) if (!Array.isArray(s[k])) s[k] = defaultState()[k];
+  s.prefs = Object.assign({ avoid: [], vego: false }, s.prefs && typeof s.prefs === "object" ? s.prefs : {});
+  if (!Array.isArray(s.prefs.avoid)) s.prefs.avoid = [];
+  for (const k of ["progress", "dagsformLog", "deviceData"]) if (!s[k] || typeof s[k] !== "object") s[k] = {};
+  s.reminders = Object.assign(defaultState().reminders, s.reminders && typeof s.reminders === "object" ? s.reminders : {});
+
+  // Värden som slås upp i tabeller måste finnas där — annars TypeError i calcTargets/switchView
+  const p = s.profile;
+  if (!GOAL_META[p.goal]) p.goal = "halsa";
+  // Användare som onboardade före inriktningarna kör vidare på målbaserade mallar
+  if (!DISC_META[p.discipline]) p.discipline = "allman";
+  if (!PACES[p.pace]) p.pace = "medel";
+  p.age = clampTo(p.age, PROFILE_SANE.age, 52);
+  p.height = clampTo(p.height, PROFILE_SANE.height, 180);
+  p.weight = clampTo(p.weight, PROFILE_SANE.weight, 88);
+  if (!Number.isFinite(+p.activity) || +p.activity <= 0) p.activity = 1.375;
+  p.trainingDays = clampTo(p.trainingDays, [1, 7], 3);
+  if (typeof p.name !== "string") p.name = "";
+
+  // Blockprogrammet ankras här istället för lat i currentBlock() — då kan
+  // en generering utanför Träning-vyn inte längre tappa bort starten.
+  s.program = Object.assign({ start: null, block: 1 }, s.program && typeof s.program === "object" ? s.program : {});
+  if (!s.program.start || !/^\d{4}-\d{2}-\d{2}$/.test(s.program.start)) s.program.start = dkey(mondayOf());
+  if (!Number.isFinite(+s.program.block) || +s.program.block < 1) s.program.block = 1;
+
+  // Passens set-antal måste vara heltal — Array(3.5) kastar RangeError i startSession
+  s.workouts.forEach(w => {
+    if (w && Array.isArray(w.exercises)) w.exercises.forEach(e => { if (e) e.sets = clampSets(e.sets); });
+  });
+
+  if (typeof s.aiKey !== "string") s.aiKey = "";
+  return s;
+}
+
 function load() {
   try {
     const raw = localStorage.getItem(STORE_KEY);
-    if (raw) {
-      const s = Object.assign(defaultState(), JSON.parse(raw));
-      // Object.assign är ytlig — nya nycklar inuti gamla objekt måste fyllas i här
-      s.schedule = Object.assign({ days: {}, time: "17:00", remind: true }, s.schedule || {});
-      if (!s.schedule.days || typeof s.schedule.days !== "object") s.schedule.days = {};
-      // En sparad logs ersätter hela standardobjektet, så nya loggtyper måste läggas tillbaka
-      s.logs = Object.assign({ meals: {}, walks: [], sessions: [], sleep: [], stress: [], weight: [], water: {}, supps: {}, bp: [] }, s.logs || {});
-      s.program = Object.assign({ start: null, block: 1 }, s.program || {});
-      // Användare som onboardade före inriktningarna kör vidare på målbaserade mallar
-      if (!s.profile.discipline || !DISC_META[s.profile.discipline]) s.profile.discipline = "allman";
-      return s;
-    }
+    if (raw) return normalizeState(JSON.parse(raw));
   } catch (e) { /* korrupt data → börja om */ }
-  return defaultState();
+  return normalizeState(null);
 }
 function save() { localStorage.setItem(STORE_KEY, JSON.stringify(state)); }
 
@@ -757,26 +812,30 @@ function lastSessionDate() {
   return s.length ? s[s.length - 1].date : null;
 }
 
-/* → { block, week, meta, restarted } — restarted är sant den gång vi ankrar om */
+/* → { block, week, meta, restarted, dirty }
+   restarted är sant den gång vi ankrar om, dirty när state.program ändrades.
+   Anroparen äger sparandet: spara när dirty, annars inte. Ett ovillkorligt save()
+   här hade serialiserat hela state vid varje vyväxling. */
 function currentBlock() {
   const prog = state.program || (state.program = { start: null, block: 1 });
   const todayMon = mondayOf();
-  let restarted = false;
+  let restarted = false, dirty = false;
 
-  if (!prog.start) { prog.start = dkey(todayMon); prog.block = 1; }
+  // Normalt satt redan i normalizeState — kvar som skydd om program nollställts
+  if (!prog.start) { prog.start = dkey(todayMon); prog.block = 1; dirty = true; }
 
   const last = lastSessionDate();
   if (last) {
     const gap = Math.floor((fromKey(dkey()) - fromKey(last)) / 86400000);
     if (gap > ABSENCE_DAYS && dkey(todayMon) !== prog.start) {
-      prog.start = dkey(todayMon); prog.block = 1; restarted = true;
+      prog.start = dkey(todayMon); prog.block = 1; restarted = true; dirty = true;
     }
   }
 
   const weeksIn = Math.max(0, Math.floor((todayMon - mondayOf(fromKey(prog.start))) / (7 * 86400000)));
   const block = prog.block + Math.floor(weeksIn / BLOCK_LEN);
   const week = (weeksIn % BLOCK_LEN) + 1;
-  return { block, week, meta: BLOCK_WEEKS[week - 1], restarted };
+  return { block, week, meta: BLOCK_WEEKS[week - 1], restarted, dirty };
 }
 
 /* Blockveckan för ett godtyckligt datum — används av kalenderexport och vyer */
@@ -928,6 +987,7 @@ function generateWorkout(opts) {
   const goal = state.profile.goal;
   const disc = disciplineOf();
   const blk = currentBlock();
+  if (blk.dirty) save(); // ankringen får inte tappas bort bara för att man genererar från Idag
   const df = computeDagsform();
   const allowedEq = eq === "gym" ? ["gym", "hantlar", "kropp"] : eq === "hantlar" ? ["hantlar", "kropp"] : ["kropp"];
   // En övning utan disc-tagg är öppen för alla; med tagg bara för sin inriktning
@@ -1004,8 +1064,6 @@ function generateWorkout(opts) {
     exercises, note: notes.join(" "),
   };
 }
-/* Bakåtkompatibel enkel slump */
-function randomWorkout(seed) { return generateWorkout({ seed, time: 45, eq: "gym", focus: "auto" }); }
 
 /* ─────────────── MATPREFERENSER & VECKOPLAN ─────────────── */
 function allRecipes() { return RECIPES.concat(state.customRecipes || []); }
@@ -1236,7 +1294,7 @@ function openEatSuggestion() {
       Förslagen tar hänsyn till dina preferenser och veckans matsedel.</p>
     ${sugg.length ? sugg.map((s, i) => `
       <div class="meal-item" style="margin-bottom:.5rem">
-        <span><b style="text-transform:capitalize;font-family:var(--font-display)">${s.meal}</b><br>${esc(s.name)}${s.rid ? ` <button class="link-btn" data-r="${s.rid}">recept</button>` : ""}</span>
+        <span><b style="text-transform:capitalize;font-family:var(--font-display)">${s.meal}</b><br>${esc(s.name)}${s.rid ? ` <button class="link-btn" data-r="${esc(s.rid)}">recept</button>` : ""}</span>
         <span style="display:flex;gap:.9rem;align-items:center">
           <span class="mi-macro">${s.kcal} kcal · ${s.p} g</span>
           <button class="btn small" data-log="${i}">+ Logga</button>
@@ -1317,7 +1375,7 @@ function renderDayPlanModal(plan) {
     ${plan.items.map((s, i) => `
       <div class="meal-item" style="margin-bottom:.5rem">
         <span><b style="text-transform:capitalize;font-family:var(--font-display)">${ICONS[s.meal] || ""} ${s.meal}</b><br>
-          ${esc(s.name)}${s.rid ? ` <button class="link-btn" data-r="${s.rid}">recept</button>` : ""}</span>
+          ${esc(s.name)}${s.rid ? ` <button class="link-btn" data-r="${esc(s.rid)}">recept</button>` : ""}</span>
         <span style="display:flex;gap:.7rem;align-items:center">
           <span class="mi-macro">${s.kcal} kcal · ${s.p} g</span>
           <button class="btn small ghost" data-re="${i}" title="Slumpa om denna">🎲</button>
@@ -1451,6 +1509,11 @@ function startOnboarding(existing) {
   ob.draft = existing ? JSON.parse(JSON.stringify(state.profile)) : defaultState().profile;
   if (!ob.draft.walksPerDay) ob.draft.walksPerDay = 1;
   ob.tmpWorkouts = existing && state.workouts.length ? JSON.parse(JSON.stringify(state.workouts)) : null;
+  // Startpassen byts bara ut om mål eller inriktning faktiskt ändras. Kör man om
+  // onboardingen för att rätta sitt namn ska egna pass och schemat överleva.
+  ob.origGoal = ob.draft.goal;
+  ob.origDisc = ob.draft.discipline;
+  ob.existing = !!existing;
   ob.tmpReminders = JSON.parse(JSON.stringify(state.reminders));
   ob.tmpPrefs = JSON.parse(JSON.stringify(state.prefs || { avoid: [], vego: false }));
   ob.tmpDevices = [...(state.devices || [])];
@@ -1568,7 +1631,7 @@ function obGoal() {
   $("#obB", el).onclick = obBack;
   $("#obN", el).onclick = () => {
     if (d.goal === "fett") d.targetWeight = +$("#obTargetW", el).value || null;
-    ob.tmpWorkouts = null;
+    if (d.goal !== ob.origGoal) ob.tmpWorkouts = null; // nytt mål → nya startpass
     obNext();
   };
   return el;
@@ -1605,7 +1668,7 @@ function obDiscipline() {
   });
   $("#obB", el).onclick = obBack;
   $("#obN", el).onclick = () => {
-    ob.tmpWorkouts = null; // ny inriktning → nya startpass i nästa steg
+    if (d.discipline !== ob.origDisc) ob.tmpWorkouts = null; // ny inriktning → nya startpass i nästa steg
     obNext();
   };
   return el;
@@ -1802,7 +1865,9 @@ function openWorkoutBuilder(index, onDone, list) {
 
     const syncInputs = () => $$("#wbExs input").forEach(inp => {
       const e = draft.exercises[+inp.dataset.i];
-      if (inp.dataset.f === "sets") e.sets = +inp.value || 3; else e[inp.dataset.f] = inp.value;
+      // min/max på inputen är bara dekoration — det finns inget <form> som validerar,
+      // och Array(3.5) i startSession() kastar RangeError.
+      if (inp.dataset.f === "sets") e.sets = clampSets(inp.value); else e[inp.dataset.f] = inp.value;
     });
     $$("#wbExs input").forEach(inp => inp.onchange = syncInputs);
     $$("#wbExs .ex-del").forEach(b => b.onclick = () => { syncInputs(); draft.exercises.splice(+b.dataset.i, 1); if (!draft.exercises.length) draft.exercises.push({ name: "", sets: 3, reps: "10" }); render(); });
@@ -1909,18 +1974,24 @@ function obSummary() {
   $("#obDone", el).onclick = () => {
     state.profile = d;
     state.targets = t;
-    state.workouts = ob.tmpWorkouts;
+    // tmpWorkouts är en djupkopia, så identitet säger inget — jämför innehållet
+    const wkChanged = JSON.stringify(state.workouts) !== JSON.stringify(ob.tmpWorkouts || []);
+    state.workouts = ob.tmpWorkouts || [];
     state.reminders = ob.tmpReminders;
     state.prefs = ob.tmpPrefs;
     state.devices = ob.tmpDevices;
     state.mealPlan = null; // ny plan utifrån nya preferenser
-    // Förifyll veckoschemat med jämnt utspridda dagar — går att ändra under Träning
-    state.schedule.days = {};
-    suggestScheduleDays(d.trainingDays).forEach((dow, i) => {
-      state.schedule.days[dow] = state.workouts.length ? state.workouts[i % state.workouts.length].id : "auto";
-    });
-    // Blocket startar den här veckan
-    state.program = { start: dkey(mondayOf()), block: 1 };
+    // Förifyll veckoschemat med jämnt utspridda dagar — går att ändra under Träning.
+    // Ett handtrimmat schema skrivs bara över när passen faktiskt byttes ut.
+    if (!ob.existing || wkChanged || !scheduleDays().length) {
+      state.schedule.days = {};
+      suggestScheduleDays(d.trainingDays).forEach((dow, i) => {
+        state.schedule.days[dow] = state.workouts.length ? state.workouts[i % state.workouts.length].id : "auto";
+      });
+    }
+    // Blocket startar den här veckan — men en omkörd onboarding nollställer inte
+    // en pågående progression.
+    if (!ob.existing || !state.program || !state.program.start) state.program = { start: dkey(mondayOf()), block: 1 };
     state.onboarded = true;
     save();
     $("#onboarding").classList.add("hidden");
@@ -2819,14 +2890,13 @@ function renderTraning(wrap) {
   const toNext = nextPhaseIn();
   const prNames = Object.keys(state.progress).filter(n => state.progress[n].weight);
   const total = state.logs.sessions.length;
-  const deloadDue = total >= 18 && total % 18 >= 0 && total % 18 < 1 && total > 0; // var ~18:e pass (≈6-8 v)
   const sinceDeload = total % 18;
   const deloadSoon = total >= 16 && sinceDeload >= 16;
   const schDays = scheduleDays();
   const schConflicts = recoveryConflicts();
   const disc = disciplineOf();
   const blk = currentBlock();
-  save(); // currentBlock kan ha ankrat om programmet
+  if (blk.dirty) save(); // bara när currentBlock faktiskt ankrade om programmet
 
   wrap.innerHTML = `
     <div class="card accent" style="margin-bottom:1.2rem;display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap">
@@ -2934,7 +3004,7 @@ function renderTraning(wrap) {
         ${w.exercises.length > 4 ? `<li><span style="color:var(--cream-faint)">+ ${w.exercises.length - 4} till…</span><span></span></li>` : ""}
       </ul>
       <div class="wk-actions">
-        <button class="btn small" data-start="${w.id}">Starta ▶</button>
+        <button class="btn small" data-start="${esc(w.id)}">Starta ▶</button>
         <button class="link-btn" data-edit="${i}">Redigera</button>
         <button class="link-btn danger" data-del="${i}">Ta bort</button>
       </div>
@@ -2983,6 +3053,7 @@ function openWorkoutGen() {
   // Ett sparat fokusval från en annan inriktning finns inte i den här listan
   if (!DISC_FOCUS[gDisc].some(([v]) => v === prefs.focus)) prefs.focus = "auto";
   const gBlk = currentBlock();
+  if (gBlk.dirty) save();
   const df = computeDagsform();
   const chip = (group, val, label, sel) => `<button class="chip ${sel ? "selected" : ""}" data-g="${group}" data-v="${val}">${label}</button>`;
   openModal(`
@@ -3048,7 +3119,7 @@ function openWorkoutPreview(w, prefs) {
 function startSession(idOrWorkout) {
   const w = typeof idOrWorkout === "string" ? state.workouts.find(x => x.id === idOrWorkout) : idOrWorkout;
   if (!w) return;
-  const done = w.exercises.map(e => Array(e.sets).fill(false));
+  const done = w.exercises.map(e => Array(clampSets(e.sets)).fill(false));
   const weights = w.exercises.map(e => {
     const nxt = overloadNext(e.name);
     return nxt != null ? nxt : "";
@@ -3148,9 +3219,9 @@ function renderRecept(wrap) {
         return `<div class="hist-item" style="align-items:flex-start;${i === todayIdx ? "background:linear-gradient(90deg,rgba(224,138,60,.1),transparent);margin:0 -1rem;padding:.7rem 1rem;border-radius:8px" : ""}">
           <span style="min-width:0">
             <b style="font-family:var(--font-mono);font-size:.75rem;color:${i === todayIdx ? "var(--amber)" : "var(--cream-faint)"};text-transform:uppercase;letter-spacing:.1em">${dayNames[i]}${i === todayIdx ? " · idag" : ""}</b><br>
-            <button class="link-btn" data-open="${id}" style="text-decoration:none;color:var(--cream);font-size:1rem">◉ ${esc(r ? r.name : "")}</button><br>
-            <span class="plan-sub">☀ ${bf ? (bf.rid ? `<button class="link-btn plan-sub-link" data-open="${bf.rid}">${esc(bf.name)}</button>` : esc(bf.name)) : "—"}
-            &nbsp;·&nbsp; ✦ ${lu ? (lu.rid ? `<button class="link-btn plan-sub-link" data-open="${lu.rid}">${esc(lu.name)}</button>` : esc(lu.name)) : "—"}</span>
+            <button class="link-btn" data-open="${esc(id)}" style="text-decoration:none;color:var(--cream);font-size:1rem">◉ ${esc(r ? r.name : "")}</button><br>
+            <span class="plan-sub">☀ ${bf ? (bf.rid ? `<button class="link-btn plan-sub-link" data-open="${esc(bf.rid)}">${esc(bf.name)}</button>` : esc(bf.name)) : "—"}
+            &nbsp;·&nbsp; ✦ ${lu ? (lu.rid ? `<button class="link-btn plan-sub-link" data-open="${esc(lu.rid)}">${esc(lu.name)}</button>` : esc(lu.name)) : "—"}</span>
           </span>
           <span class="h-date" style="white-space:nowrap">${r ? (r.kcal + (bf ? bf.kcal : 0) + (lu ? lu.kcal : 0)) + " kcal · " + (r.p + (bf ? bf.p : 0) + (lu ? lu.p : 0)) + " g" : ""}</span>
         </div>`;
@@ -3185,9 +3256,9 @@ function renderRecept(wrap) {
 
     <div class="recipe-grid" id="rGrid">
       ${list.map(r => `
-        <button class="recipe-card" data-r="${r.id}">
+        <button class="recipe-card" data-r="${esc(r.id)}">
           <div class="recipe-band" style="background:${r.color}"></div>
-          <span class="fav-star ${isFav(r.id) ? "faved" : ""}" data-fav="${r.id}" title="Favoritmarkera">${isFav(r.id) ? "★" : "☆"}</span>
+          <span class="fav-star ${isFav(r.id) ? "faved" : ""}" data-fav="${esc(r.id)}" title="Favoritmarkera">${isFav(r.id) ? "★" : "☆"}</span>
           <div class="recipe-body">
             <h3>${esc(r.name)}</h3>
             <p class="r-desc">${esc(r.desc)}</p>
@@ -3706,9 +3777,9 @@ function renderInstallningar(wrap) {
       <div class="card-kicker">Profil & mål</div>
       <div class="ob-grid" style="margin:1rem 0">
         <div><label>Namn</label><input id="sName" value="${esc(p.name)}"></div>
-        <div><label>Ålder</label><input id="sAge" type="number" value="${p.age}"></div>
-        <div><label>Längd (cm)</label><input id="sHeight" type="number" value="${p.height}"></div>
-        <div><label>Vikt (kg)</label><input id="sWeight" type="number" value="${p.weight}"></div>
+        <div><label>Ålder</label><input id="sAge" type="number" min="${PROFILE_LIMITS.age[0]}" max="${PROFILE_LIMITS.age[1]}" value="${p.age}"></div>
+        <div><label>Längd (cm)</label><input id="sHeight" type="number" min="${PROFILE_LIMITS.height[0]}" max="${PROFILE_LIMITS.height[1]}" value="${p.height}"></div>
+        <div><label>Vikt (kg)</label><input id="sWeight" type="number" min="${PROFILE_LIMITS.weight[0]}" max="${PROFILE_LIMITS.weight[1]}" step="0.1" value="${p.weight}"></div>
         <div><label>Mål</label><select id="sGoal">
           ${Object.entries(GOAL_META).map(([k, g]) => `<option value="${k}" ${p.goal === k ? "selected" : ""}>${g.label}</option>`).join("")}
         </select></div>
@@ -3822,10 +3893,28 @@ function renderInstallningar(wrap) {
   });
   $("#sSync").onclick = openDeviceSync;
   $("#sSave").onclick = () => {
+    // Orimliga värden ger negativ BMR och därmed negativa mål för kalorier,
+    // protein och fett. Avvisa istället för att spara tyst.
+    const num = (sel, key, label, unit) => {
+      const raw = $(sel).value.trim();
+      if (!raw) return p[key];
+      const [lo, hi] = PROFILE_LIMITS[key];
+      const n = Number(raw.replace(",", "."));
+      if (!Number.isFinite(n) || n < lo || n > hi) {
+        toast("⚠️", "Orimlig " + label, label[0].toUpperCase() + label.slice(1) + " måste ligga mellan " + lo + " och " + hi + " " + unit + ".");
+        return null;
+      }
+      return n;
+    };
+    const nAge = num("#sAge", "age", "ålder", "år");
+    const nHeight = num("#sHeight", "height", "längd", "cm");
+    const nWeight = num("#sWeight", "weight", "vikt", "kg");
+    if (nAge === null || nHeight === null || nWeight === null) return;
+
     p.name = $("#sName").value.trim() || p.name;
-    p.age = +$("#sAge").value || p.age;
-    p.height = +$("#sHeight").value || p.height;
-    p.weight = +$("#sWeight").value || p.weight;
+    p.age = nAge;
+    p.height = nHeight;
+    p.weight = nWeight;
     p.goal = $("#sGoal").value;
     p.trainingDays = +$("#sDays").value;
     // Byte av inriktning startar ett nytt block — annars hamnar man mitt i en
@@ -3910,18 +3999,31 @@ function renderInstallningar(wrap) {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
+      // Bygg upp och verifiera i en lokal variabel — state byts ut och sparas
+      // först när vi vet att den nya datan faktiskt går att rendera.
+      let next;
       try {
         const data = JSON.parse(reader.result);
         if (!data.profile || !data.logs) throw new Error("fel format");
-        if (!confirm("Ersätt all data i den här webbläsaren med innehållet i \"" + file.name + "\"?")) return;
-        state = Object.assign(defaultState(), data);
-        state.targets = calcTargets(state.profile);
-        save();
-        toast("✓", "Data importerad", "Välkommen tillbaka, " + state.profile.name + " — allt är på plats.");
-        switchView("idag");
+        next = normalizeState(data);
+        next.targets = calcTargets(next.profile);
       } catch (err) {
         toast("⚠️", "Kunde inte läsa filen", "Är det verkligen en STARK50-export? (" + err.message + ")");
+        return;
       }
+      if (!confirm("Ersätt all data i den här webbläsaren med innehållet i \"" + file.name + "\"?")) return;
+      const prev = state;
+      state = next;
+      try {
+        switchView("idag");
+      } catch (err) {
+        state = prev;                     // inget sparat ännu — den gamla datan är orörd
+        switchView("installningar");
+        toast("⚠️", "Filen gick inte att visa", "Importen avbröts och din tidigare data ligger kvar. (" + err.message + ")");
+        return;
+      }
+      save();
+      toast("✓", "Data importerad", "Välkommen tillbaka, " + state.profile.name + " — allt är på plats.");
     };
     reader.readAsText(file);
   };
@@ -3936,7 +4038,7 @@ function renderInstallningar(wrap) {
 }
 
 /* ═══════════════ START ═══════════════ */
-function init() {
+function boot() {
   if (!state.onboarded) {
     startOnboarding(false);
   } else {
@@ -3947,5 +4049,26 @@ function init() {
     switchView("idag");
   }
   checkReminders();
+}
+
+/* Kraschar starten får appen aldrig bli en vit skärm: då sitter både export och
+   "Nollställ allt" inlåsta i ett gränssnitt som aldrig renderas. Vi backar därför
+   till ett tomt state och låter användaren börja om — den sparade datan ligger
+   kvar i localStorage tills hen faktiskt väljer att skriva över den. */
+function init() {
+  try {
+    state = load();
+    boot();
+  } catch (e) {
+    console.error("STARK50 kunde inte starta med sparad data:", e);
+    state = normalizeState(null);
+    try {
+      boot();
+      toast("⚠️", "Din data kunde inte läsas", "Appen startade tom. Har du en backup går den att importera i Inställningar.");
+    } catch (e2) {
+      console.error("STARK50 kunde inte starta alls:", e2);
+      document.body.innerHTML = '<p style="padding:24px;font:16px system-ui;color:#e8e2d5;background:#12100e">STARK50 kunde inte starta. Ladda om sidan.</p>';
+    }
+  }
 }
 init();
