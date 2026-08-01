@@ -5,7 +5,7 @@
    när en ny sw.js råkade hinna installeras — vilket Safari letar efter som mest en
    gång per dygn. Appskalet hämtas därför nu från nätet först, med cachen som
    reserv när nätet är borta eller långsamt. */
-const CACHE = "stark50-v7";
+const CACHE = "stark50-v8";
 const BUILD = "2026-07-28";
 const NET_TIMEOUT = 3000; // ms innan vi ger upp och tar cachen — offline ska kännas snabbt
 const ASSETS = ["./", "./index.html", "./styles.css", "./app.js", "./manifest.webmanifest"];
