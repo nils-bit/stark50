@@ -1,0 +1,12 @@
+name = "stark50-sync"
+main = "worker.js"
+compatibility_date = "2026-07-28"
+
+# KV-namnrymden som lagrar den krypterade blobben.
+# id fylls i av kommandot i README.md — det är inte hemligt, men det är ditt.
+[[kv_namespaces]]
+binding = "STARK50"
+id = "FYLL_I_EFTER_KV_CREATE"
+
+# SYNC_TOKEN sätts som secret, inte här:
+#   npx wrangler secret put SYNC_TOKEN

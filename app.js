@@ -322,6 +322,9 @@ function defaultState() {
     devices: [],         // anslutna enhets-id:n
     deviceData: {},      // { "YYYY-MM-DD": { steps, rhr, sleep } }
     fired: { date: "", keys: [] },
+    // Synkinställningar. Ligger UTANFÖR det som synkas — varje enhet har sin
+    // egen serveradress, nyckel och senast sedda revision.
+    sync: { url: "", key: "", rev: 0, at: 0, err: "" },
   };
 }
 /* Yttergränser för profilvärden. Onboardingen och inställningarna är strängare
@@ -385,7 +388,40 @@ function normalizeState(raw) {
   });
 
   if (typeof s.aiKey !== "string") s.aiKey = "";
+
+  s.sync = Object.assign({ url: "", key: "", rev: 0, at: 0, err: "" }, s.sync && typeof s.sync === "object" ? s.sync : {});
+  if (typeof s.sync.url !== "string") s.sync.url = "";
+  if (typeof s.sync.key !== "string") s.sync.key = "";
+  if (!Number.isInteger(+s.sync.rev) || +s.sync.rev < 0) s.sync.rev = 0;
+
+  // Varje loggpost måste kunna kännas igen över enhetsgränsen, annars går två
+  // identiska promenader samma dag inte att skilja åt vid sammanslagning.
+  // Poster från före synken får sitt id här, en gång.
+  ensureLogIds(s);
   return s;
+}
+
+/* ─────────────── LOGG-ID:N ───────────────
+   Deterministiska nog att vara stabila, slumpade nog att två enheter aldrig
+   råkar hitta på samma. Tilldelas vid skrivning och i normalizeState. */
+function logId() {
+  const r = new Uint8Array(9);
+  (self.crypto || window.crypto).getRandomValues(r);
+  return [...r].map(b => b.toString(36).padStart(2, "0")).join("");
+}
+
+const ID_ARRAYS = ["walks", "sessions", "sleep", "stress", "weight", "bp"];
+
+function ensureLogIds(s) {
+  ID_ARRAYS.forEach(k => {
+    (s.logs[k] || []).forEach(e => { if (e && typeof e === "object" && !e._id) e._id = logId(); });
+  });
+  const meals = s.logs.meals || {};
+  Object.keys(meals).forEach(day => {
+    if (!Array.isArray(meals[day])) { meals[day] = []; return; }
+    meals[day].forEach(m => { if (m && typeof m === "object" && !m._id) m._id = logId(); });
+  });
+  (s.body || []).forEach(e => { if (e && typeof e === "object" && !e._id) e._id = logId(); });
 }
 
 function load() {
@@ -395,7 +431,235 @@ function load() {
   } catch (e) { /* korrupt data → börja om */ }
   return normalizeState(null);
 }
-function save() { localStorage.setItem(STORE_KEY, JSON.stringify(state)); }
+function save() {
+  // Id:n sätts här i stället för på de tretton skrivställena — då kan varken
+  // de eller framtida skrivningar glömma det. Kostar en genomgång av loggarna,
+  // försumbart mot JSON.stringify på raden efter.
+  ensureLogIds(state);
+  localStorage.setItem(STORE_KEY, JSON.stringify(state));
+  syncSoon(); // ingen effekt om synk är avstängd
+}
+
+/* ═══════════════ SYNK MELLAN ENHETER ═══════════════
+   En krypterad blob hos en egen Cloudflare Worker (se sync/README.md).
+
+   Tre saker gör den säker att lita på:
+
+   1. Servern kan inte läsa datan. Blobben krypteras med AES-GCM här inne.
+      Ur synknyckeln härleds två nycklar åt olika håll: en hash som servern
+      autentiserar mot, och en PBKDF2-nyckel som krypterar. Servern ser bara
+      den första och kan inte räkna baklänges till den andra.
+
+   2. Ingenting kan försvinna. Två enheter som loggat var sin lunch samma dag
+      slås ihop post för post på _id — inte "senast skrivna vinner".
+
+   3. Appen väntar aldrig på synken. Allt är bäst-möjliga-försök i bakgrunden.
+      Utan nät fungerar appen precis som förut och synkar när nätet är tillbaka. */
+
+const SYNC_DEBOUNCE = 5000;
+const enc = new TextEncoder();
+const dec = new TextDecoder();
+const subtle = () => (self.crypto || window.crypto).subtle;
+
+const toHex = buf => [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
+const b64 = buf => btoa(String.fromCharCode(...new Uint8Array(buf)));
+const unb64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+
+/* Servertoken — det enda av nycklarna som lämnar enheten i klartext. */
+async function syncAuthToken(key) {
+  return toHex(await subtle().digest("SHA-256", enc.encode(key + ":auth")));
+}
+
+/* Krypteringsnyckeln. PBKDF2 gör att en gissad synknyckel kostar att pröva,
+   och ":enc" skiljer den från autentiseringshashen ovan. */
+async function syncEncKey(key) {
+  const base = await subtle().importKey("raw", enc.encode(key + ":enc"), "PBKDF2", false, ["deriveKey"]);
+  return subtle().deriveKey(
+    { name: "PBKDF2", salt: enc.encode("stark50-sync-v1"), iterations: 150000, hash: "SHA-256" },
+    base, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+}
+
+async function syncEncrypt(key, obj) {
+  const iv = (self.crypto || window.crypto).getRandomValues(new Uint8Array(12));
+  const ct = await subtle().encrypt({ name: "AES-GCM", iv }, await syncEncKey(key), enc.encode(JSON.stringify(obj)));
+  return b64(iv) + "." + b64(ct);
+}
+
+async function syncDecrypt(key, blob) {
+  const [ivPart, ctPart] = String(blob).split(".");
+  if (!ivPart || !ctPart) throw new Error("skadat format");
+  const pt = await subtle().decrypt({ name: "AES-GCM", iv: unb64(ivPart) }, await syncEncKey(key), unb64(ctPart));
+  return JSON.parse(dec.decode(pt));
+}
+
+/* Vad som faktiskt skickas. sync utelämnas — serveradress, nyckel och revision
+   är enhetens egna och ska inte spridas till andra enheter. */
+function syncPayload() {
+  const { sync, ...rest } = state;
+  return rest;
+}
+
+/* ─── Sammanslagning ───
+   Ordningsoberoende: samma resultat oavsett vilken enhet som synkar först.
+   Loggar unionsslås på _id, allt annat tas från den nyare sidan. */
+function mergeStates(mine, theirs) {
+  if (!theirs || typeof theirs !== "object") return mine;
+  const out = Object.assign({}, theirs, mine); // egna värden vinner för inställningar
+
+  const byId = (a = [], b = []) => {
+    const seen = new Map();
+    [...a, ...b].forEach(e => { if (e && typeof e === "object") seen.set(e._id || JSON.stringify(e), e); });
+    return [...seen.values()];
+  };
+  const sortByDate = arr => arr.sort((x, y) => String(x.date || "").localeCompare(String(y.date || "")));
+
+  out.logs = Object.assign({}, theirs.logs, mine.logs);
+  ID_ARRAYS.forEach(k => {
+    out.logs[k] = sortByDate(byId((mine.logs || {})[k], (theirs.logs || {})[k]));
+  });
+
+  // Måltider: union per dag, så båda enheternas lunch finns kvar
+  const mm = (mine.logs || {}).meals || {}, tm = (theirs.logs || {}).meals || {};
+  out.logs.meals = {};
+  new Set([...Object.keys(mm), ...Object.keys(tm)]).forEach(day => {
+    out.logs.meals[day] = byId(mm[day], tm[day]);
+  });
+
+  // Vatten: man dricker bara mer under dagen, aldrig mindre
+  const mw = (mine.logs || {}).water || {}, tw = (theirs.logs || {}).water || {};
+  out.logs.water = {};
+  new Set([...Object.keys(mw), ...Object.keys(tw)]).forEach(day => {
+    out.logs.water[day] = Math.max(+mw[day] || 0, +tw[day] || 0);
+  });
+
+  // Tillskott: taget är taget, på vilken enhet det än kryssades
+  const ms = (mine.logs || {}).supps || {}, ts = (theirs.logs || {}).supps || {};
+  out.logs.supps = {};
+  new Set([...Object.keys(ms), ...Object.keys(ts)]).forEach(day => {
+    out.logs.supps[day] = Object.assign({}, ts[day] || {});
+    Object.keys(ms[day] || {}).forEach(k => { if (ms[day][k]) out.logs.supps[day][k] = true; });
+  });
+
+  out.body = sortByDate(byId(mine.body, theirs.body));
+  // Pass och recept har egna id sedan tidigare — union så inget handbyggt tappas
+  const byWid = (a = [], b = []) => {
+    const seen = new Map();
+    [...b, ...a].forEach(w => { if (w && w.id) seen.set(w.id, w); });
+    return [...seen.values()];
+  };
+  out.workouts = byWid(mine.workouts, theirs.workouts);
+  out.customRecipes = byWid(mine.customRecipes, theirs.customRecipes);
+  out.favs = [...new Set([...(mine.favs || []), ...(theirs.favs || [])])];
+  out.dagsformLog = Object.assign({}, theirs.dagsformLog, mine.dagsformLog);
+  out.deviceData = Object.assign({}, theirs.deviceData, mine.deviceData);
+  out.progress = Object.assign({}, theirs.progress, mine.progress);
+  return out;
+}
+
+/* ─── Nätverk ─── */
+const syncOn = () => !!(state.sync && state.sync.url && state.sync.key);
+let syncTimer = null, syncBusy = false, syncAgain = false;
+
+async function syncFetch(path, opts = {}) {
+  const base = state.sync.url.replace(/\/+$/, "");
+  const token = await syncAuthToken(state.sync.key);
+  const res = await fetch(base + path, Object.assign({}, opts, {
+    headers: Object.assign({ "Authorization": "Bearer " + token, "Content-Type": "application/json" }, opts.headers || {}),
+  }));
+  let body = null;
+  try { body = await res.json(); } catch (e) { /* tomt eller icke-JSON */ }
+  return { status: res.status, body };
+}
+
+/* Hämta, slå ihop in i det lokala tillståndet. Returnerar true om något ändrades. */
+async function syncPull() {
+  const r = await syncFetch("/v1/state");
+  if (r.status === 401) throw new Error("fel nyckel");
+  if (r.status !== 200) throw new Error("servern svarade " + r.status);
+  if (!r.body || !r.body.blob) { state.sync.rev = r.body ? r.body.rev : 0; return false; }
+
+  let remote;
+  try { remote = await syncDecrypt(state.sync.key, r.body.blob); }
+  catch (e) { throw new Error("kunde inte dekryptera — är det samma synknyckel?"); }
+
+  const before = JSON.stringify(syncPayload());
+  const merged = normalizeState(mergeStates(syncPayload(), remote));
+  merged.sync = state.sync;
+  state = merged;
+  state.sync.rev = r.body.rev;
+  return JSON.stringify(syncPayload()) !== before;
+}
+
+/* Skicka. Vid krock: hämta, slå ihop, försök igen. */
+async function syncPush(depth = 0) {
+  const blob = await syncEncrypt(state.sync.key, syncPayload());
+  const r = await syncFetch("/v1/state", { method: "PUT", body: JSON.stringify({ rev: state.sync.rev, blob }) });
+  if (r.status === 200) { state.sync.rev = r.body.rev; return; }
+  if (r.status === 401) throw new Error("fel nyckel");
+  if (r.status === 409 && depth < 3) {
+    // Någon annan enhet hann före — ta in dess ändringar och skicka om
+    await syncPull();
+    return syncPush(depth + 1);
+  }
+  throw new Error("servern svarade " + r.status);
+}
+
+async function syncNow(opts = {}) {
+  if (!syncOn() || syncBusy) { if (syncBusy) syncAgain = true; return; }
+  syncBusy = true;
+  const wasErr = state.sync.err;
+  try {
+    const changed = await syncPull();
+    await syncPush();
+    state.sync.at = Date.now();
+    state.sync.err = "";
+    localStorage.setItem(STORE_KEY, JSON.stringify(state));
+    // Kom data in utifrån måste vyn ritas om, annars sitter man och tittar på
+    // gårdagens siffror tills man byter flik
+    if (changed && !opts.quiet) { try { switchView(currentView); } catch (e) { /* vyn hinner ikapp senare */ } }
+    if (opts.toast) toast("✓", "Synkad", "Dina enheter har samma data nu.");
+  } catch (e) {
+    state.sync.err = e.message || "okänt fel";
+    localStorage.setItem(STORE_KEY, JSON.stringify(state));
+    // Tyst i bakgrunden — nätet kommer och går, och appen fungerar ändå.
+    // Bara den som tryckt "Synka nu" ska få ett felmeddelande.
+    if (opts.toast) toast("⚠️", "Synken misslyckades", state.sync.err);
+    else if (wasErr !== state.sync.err) console.warn("STARK50 synk:", state.sync.err);
+  } finally {
+    syncBusy = false;
+    if (syncAgain) { syncAgain = false; syncSoon(); }
+    if (typeof renderSyncStatus === "function") renderSyncStatus();
+  }
+}
+
+/* Anropas från save(), alltså vid varje ändring. Debounce så att ett pass med
+   tjugo bockade set blir en skrivning och inte tjugo. */
+function syncSoon() {
+  if (!syncOn()) return;
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(() => syncNow({ quiet: true }), SYNC_DEBOUNCE);
+}
+
+/* Statusraden i Synk-kortet. Anropas av syncNow när något ändrats, så raden
+   speglar verkligheten även när synken körde i bakgrunden. */
+function renderSyncStatus() {
+  const el = document.getElementById("sSyncStatus");
+  if (!el) return;
+  if (!syncOn()) { el.textContent = "Status: avstängd"; el.style.color = "var(--cream-faint)"; return; }
+  if (state.sync.err) {
+    el.textContent = "Status: fungerar inte — " + state.sync.err;
+    el.style.color = "var(--clay)";
+    return;
+  }
+  const at = state.sync.at;
+  let när = "aldrig";
+  if (at) {
+    const min = Math.floor((Date.now() - at) / 60000);
+    när = min < 1 ? "nyss" : min < 60 ? min + " min sedan" : Math.floor(min / 60) + " tim sedan";
+  }
+  el.textContent = "Status: påslagen · senast synkad " + när + " · version " + state.sync.rev;
+  el.style.color = "var(--cream-dim)";
+}
 
 /* ─────────────── HJÄLPARE ─────────────── */
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -1523,7 +1787,14 @@ function checkReminders() {
 }
 setInterval(checkReminders, 30000);
 // Fånga upp missade påminnelser när appen tas fram igen
-document.addEventListener("visibilitychange", () => { if (!document.hidden) checkReminders(); });
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) return;
+  checkReminders();
+  // Appen blir synlig = en hemskärms-PWA har just startat. Hämta det andra
+  // enheter loggat sedan sist.
+  syncNow({ quiet: true });
+});
+window.addEventListener("online", () => syncNow({ quiet: true }));
 
 /* ═══════════════ ONBOARDING ═══════════════ */
 
@@ -3895,10 +4166,83 @@ function renderInstallningar(wrap) {
         <button class="btn ghost small" id="sOnboard">Kör om onboardingen</button>
         <button class="btn ghost small" id="sReset" style="border-color:var(--clay);color:var(--clay)">Nollställ allt</button>
       </div>
-      <p class="sub" style="margin-top:.8rem;font-size:.82rem">Kör du appen på både dator och mobil? Exportera på den ena, importera på den andra — så följer allt med.</p>
+      <p class="sub" style="margin-top:.8rem;font-size:.82rem">${syncOn()
+        ? "Synken nedan håller dina enheter i takt automatiskt. Exportfilen är ändå värd att ta då och då — den ligger hos dig."
+        : "Kör du appen på både dator och mobil? Exportera på den ena, importera på den andra — eller slå på synken nedan."}</p>
       ${state.aiKey ? `<p class="sub" style="margin-top:.5rem;font-size:.82rem;color:var(--amber-soft)">⚠️ Din API-nyckel följer med i exportfilen. Dela den inte vidare.</p>` : ""}
       <p class="sub" id="sVersion" style="margin-top:.8rem;font-size:.78rem;font-family:var(--font-mono)">Version: kontrollerar…</p>
+    </div>
+
+    <div class="card" style="margin-top:1.2rem">
+      <div class="card-kicker">Synk mellan enheter</div>
+      <h3 style="margin:.3rem 0 .6rem">Samma data i mobilen och på datorn</h3>
+      <p class="sub" style="margin-bottom:1rem">Din data krypteras i telefonen innan den skickas, så servern kan inte läsa den.
+      Loggar du på två enheter slås posterna ihop — ingenting skrivs över.
+      Servern sätter du upp själv en gång och den kostar ingenting; instruktionerna ligger i <code>sync/README.md</code> i repot.</p>
+
+      <p class="sub" id="sSyncStatus" style="margin-bottom:1rem;font-family:var(--font-mono);font-size:.82rem"></p>
+
+      <div><label>Serveradress</label>
+        <input id="sSyncUrl" value="${esc(state.sync.url || "")}" placeholder="https://stark50-sync.ditt-konto.workers.dev" autocomplete="off" spellcheck="false"></div>
+      <div style="margin-top:.9rem"><label>Synknyckel</label>
+        <input id="sSyncKey" type="password" value="${esc(state.sync.key || "")}" placeholder="klistra in från din andra enhet" autocomplete="off" spellcheck="false"></div>
+
+      <div style="display:flex;gap:.7rem;margin-top:1rem;flex-wrap:wrap">
+        <button class="btn small" id="sSyncSave">Spara och synka</button>
+        <button class="btn ghost small" id="sSyncGen">Skapa ny synknyckel</button>
+        ${syncOn() ? `<button class="btn ghost small" id="sSyncNow">Synka nu</button>
+        <button class="btn ghost small" id="sSyncOff" style="border-color:var(--clay);color:var(--clay)">Stäng av synk</button>` : ""}
+      </div>
+
+      <p class="sub" style="margin-top:.9rem;font-size:.82rem"><b>Spara synknyckeln i din lösenordshanterare.</b>
+      Den är det enda som kan låsa upp serverkopian — tappar du den är den obrukbar för alltid, också för mig.
+      Din data i telefonen påverkas inte, och exportfilen fungerar som vanligt.</p>
     </div>`;
+
+  renderSyncStatus();
+  $("#sSyncSave").onclick = async () => {
+    const url = $("#sSyncUrl").value.trim().replace(/\/+$/, "");
+    const key = $("#sSyncKey").value.trim();
+    if (!url || !key) { toast("⚠️", "Fyll i båda fälten", "Både serveradress och synknyckel behövs."); return; }
+    // https överallt utom mot din egen maskin, där det inte finns något nät att avlyssna
+    if (!/^https:\/\//i.test(url) && !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(url)) {
+      toast("⚠️", "Adressen måste vara https", "Data ska aldrig skickas okrypterat över nätet.");
+      return;
+    }
+    state.sync.url = url;
+    // Ny nyckel eller ny server → vi vet inget om serverns revision än
+    if (key !== state.sync.key) { state.sync.key = key; state.sync.rev = 0; }
+    state.sync.err = "";
+    save();
+    await syncNow({ toast: true });
+    switchView("installningar");
+  };
+  $("#sSyncGen").onclick = async () => {
+    if (state.sync.key && !confirm("Du har redan en synknyckel. Skapar du en ny blir serverns nuvarande kopia oläsbar och dina andra enheter tappar kontakten. Fortsätta?")) return;
+    const raw = (self.crypto || window.crypto).getRandomValues(new Uint8Array(24));
+    const key = [...raw].map(b => b.toString(16).padStart(2, "0")).join("");
+    const token = await syncAuthToken(key);
+    $("#sSyncKey").value = key;
+    openModal(`
+      <h2 class="modal-title">Din synknyckel</h2>
+      <p class="sub">Spara båda värdena nu. Nyckeln visas aldrig igen i klartext efter att du lämnat den här rutan.</p>
+      <label style="margin-top:1rem">Synknyckel — till dina egna enheter, håll hemlig</label>
+      <input readonly value="${esc(key)}" onclick="this.select()" style="font-family:var(--font-mono);font-size:.8rem">
+      <label style="margin-top:1rem">Servertoken — den här sätter du på servern</label>
+      <input readonly value="${esc(token)}" onclick="this.select()" style="font-family:var(--font-mono);font-size:.8rem">
+      <p class="sub" style="margin-top:1rem;font-size:.82rem">Servertoken är en hash av synknyckeln. Den kan autentisera dig mot servern men inte dekryptera något — därför kan den ligga hos Cloudflare utan att din data blir läsbar.</p>
+      <p class="sub" style="margin-top:.6rem;font-size:.82rem">Nästa steg står i <code>sync/README.md</code>. Kom tillbaka hit och tryck <b>Spara och synka</b> när servern är uppe.</p>
+      <div class="ob-nav"><button class="btn" id="syncKeyOk">Jag har sparat båda</button></div>`);
+    $("#syncKeyOk").onclick = closeModal;
+  };
+  if ($("#sSyncNow")) $("#sSyncNow").onclick = () => syncNow({ toast: true });
+  if ($("#sSyncOff")) $("#sSyncOff").onclick = () => {
+    if (!confirm("Stänga av synken? Din data ligger kvar både här och på servern — enheterna slutar bara hålla varandra uppdaterade.")) return;
+    state.sync = { url: "", key: "", rev: 0, at: 0, err: "" };
+    save();
+    switchView("installningar");
+    toast("✓", "Synk avstängd", "Appen fungerar precis som förut, allt ligger kvar lokalt.");
+  };
 
   swVersion().then(v => {
     const el = $("#sVersion");
@@ -4083,6 +4427,7 @@ function boot() {
     switchView("idag");
   }
   checkReminders();
+  syncNow({ quiet: true }); // bäst-möjliga-försök, blockerar aldrig starten
 }
 
 /* Kraschar starten får appen aldrig bli en vit skärm: då sitter både export och
