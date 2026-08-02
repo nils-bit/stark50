@@ -1,0 +1,17 @@
+{
+  "name": "CERTCRAM — certification study",
+  "short_name": "CERTCRAM",
+  "description": "Turns certification blueprints and workbooks into an 80/20 study plan that drills whatever is heaviest on the exam and weakest in your head.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0f1116",
+  "theme_color": "#14161c",
+  "categories": ["education", "productivity"],
+  "lang": "en",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

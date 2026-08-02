@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>CERTCRAM — pass the exam, not the syllabus</title>
+<meta name="description" content="An offline-first study app that turns certification blueprints and workbooks into an 80/20 plan: it drills whatever is heaviest on the exam and weakest in your head.">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#14161c">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="CERTCRAM">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<!-- The fonts load without blocking. A normal stylesheet link holds the scripts
+     back until Google answers, which on a bad train connection is several
+     seconds of blank screen. media="print" makes the link non-blocking; onload
+     switches it on for real. The fallback stack in styles.css carries the
+     first paint. -->
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+<noscript><link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet"></noscript>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- ══════════════ ONBOARDING ══════════════ -->
+<div id="onboarding" class="onboarding hidden">
+  <div class="ob-grid"></div>
+  <div class="ob-inner" id="obInner"></div>
+</div>
+
+<!-- ══════════════ MAIN APP ══════════════ -->
+<div id="app" class="app hidden">
+  <aside class="sidebar">
+    <div class="brand">CERT<span>CRAM</span></div>
+    <nav class="nav" id="nav">
+      <button class="nav-btn active" data-view="today"><span class="nav-ico">◉</span>Today</button>
+      <button class="nav-btn" data-view="study"><span class="nav-ico">▤</span>Study</button>
+      <button class="nav-btn" data-view="mock"><span class="nav-ico">⏱</span>Mock</button>
+      <button class="nav-btn" data-view="certs"><span class="nav-ico">◈</span>Certs</button>
+    </nav>
+    <button class="nav-btn nav-settings" data-view="settings"><span class="nav-ico">⚙</span>Settings</button>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div>
+        <div class="topbar-date" id="topbarDate"></div>
+        <h1 class="topbar-title" id="topbarTitle">Today</h1>
+      </div>
+      <div class="topbar-user" id="topbarUser"></div>
+    </header>
+    <div class="view-wrap" id="viewWrap"></div>
+  </main>
+</div>
+
+<!-- Toast container for reminders and confirmations -->
+<div class="toasts" id="toasts"></div>
+
+<!-- Single global modal -->
+<div class="modal-backdrop hidden" id="modalBackdrop">
+  <div class="modal" id="modal"></div>
+</div>
+
+<!-- Classic scripts, explicit load order, one shared global scope. No ES
+     modules: nothing here needs them, and they would complicate both the
+     service worker's asset list and opening the app straight off disk.
+     Dependencies flow downward — nothing forward-references at load time.
+
+     Course files are plain scripts so the service worker caches them as static
+     assets. Keeping ~280 kB of course JSON out of localStorage matters because
+     save() runs on every single card grade; see state.js for why that is split
+     across two keys. -->
+<script src="core.js"></script>
+<script src="state.js"></script>
+<script src="course.js"></script>
+<script src="courses/hubspot-trainer.js"></script>
+<script src="courses/hubspot-revops.js"></script>
+<script src="courses/ccao-f.js"></script>
+<script src="srs.js"></script>
+<script src="engine.js"></script>
+<script src="plan.js"></script>
+<script src="ai.js"></script>
+<script src="drill.js"></script>
+<script src="mock.js"></script>
+<script src="views.js"></script>
+<script src="onboarding.js"></script>
+<script src="app.js"></script>
+<script>
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").then(reg => {
+      if (!reg) return;
+      // A home-screen PWA "starts" by becoming visible again. That is the moment
+      // to ask for new code — Safari otherwise checks at most once a day.
+      const check = () => reg.update().catch(() => {});
+      document.addEventListener("visibilitychange", () => { if (!document.hidden) check(); });
+      check();
+      // New version installed alongside the running one: say so, do not reload
+      // under the fingers of someone halfway through a timed mock exam.
+      reg.addEventListener("updatefound", () => {
+        const sw = reg.installing;
+        if (!sw) return;
+        sw.addEventListener("statechange", () => {
+          if (sw.state === "installed" && navigator.serviceWorker.controller && window.onAppUpdate) window.onAppUpdate();
+        });
+      });
+    }).catch(() => {}));
+  }
+</script>
+</body>
+</html>
