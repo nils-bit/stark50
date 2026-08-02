@@ -18,6 +18,7 @@ window.CERT_COURSES.push({
     vendor: "HubSpot Academy",
     blurb: "Aligning marketing, sales and service around one process, one data set and one set of numbers.",
   },
+  weightsNote: "HubSpot does not publish a numeric blueprint for this exam. These weights are inferred from the relative depth of the published lessons — treat the split as approximate.",
   exam: {
     questionCount: 60,
     timeLimitMin: 180,

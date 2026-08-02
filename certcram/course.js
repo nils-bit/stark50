@@ -84,6 +84,11 @@ function normalizeCourse(raw, source) {
       vendor: txt(raw.cert && raw.cert.vendor, 60),
       blurb: txt(raw.cert && raw.cert.blurb, 240),
     },
+    /* Where the domain weights came from, when they are not all official.
+       These weights drive the entire study plan, so a course built on inferred
+       ones has to say so somewhere the user actually looks — not only in a
+       comment at the top of the file. */
+    weightsNote: txt(raw.weightsNote, 400),
   };
 
   const ex = raw.exam || {};

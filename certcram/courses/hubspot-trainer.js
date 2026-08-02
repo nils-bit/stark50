@@ -24,6 +24,7 @@ window.CERT_COURSES.push({
     vendor: "HubSpot Academy",
     blurb: "Training fundamentals, content design, delivery and running training as a service. Exam plus a graded practicum workbook.",
   },
+  weightsNote: "HubSpot does not publish a numeric blueprint for this exam. These weights are inferred from the relative depth of the published lessons — treat the split as approximate.",
   exam: {
     questionCount: 60,
     timeLimitMin: 180,

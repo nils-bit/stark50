@@ -394,14 +394,22 @@ async function generateCourse(source, onProgress) {
     });
     let v = validateChunk(raw, d, wantCards, wantQuestions, seenStems, multiSelect);
 
+    /* A chunk that came back light gets one top-up call. If that call fails we
+       keep what the first one produced rather than losing the domain: a short
+       chunk is worth far more than nothing, and discarding it would also cost a
+       full re-generation of this domain on resume. */
     if (v.short) {
-      const top = await claudeRetry({
-        systemBlocks: sys,
-        user: chunkPrompt(d, Math.max(1, v.needCards), Math.max(1, v.needQuestions), outline, [...seenStems]),
-        schema: CHUNK_SCHEMA, maxTokens: MAX_TOK_CHUNK, effort: "medium",
-      });
-      const extra = validateChunk(top, d, v.needCards, v.needQuestions, seenStems, multiSelect);
-      v = { cards: v.cards.concat(extra.cards), questions: v.questions.concat(extra.questions) };
+      try {
+        const top = await claudeRetry({
+          systemBlocks: sys,
+          user: chunkPrompt(d, Math.max(1, v.needCards), Math.max(1, v.needQuestions), outline, [...seenStems]),
+          schema: CHUNK_SCHEMA, maxTokens: MAX_TOK_CHUNK, effort: "medium",
+        });
+        const extra = validateChunk(top, d, v.needCards, v.needQuestions, seenStems, multiSelect);
+        v = { cards: v.cards.concat(extra.cards), questions: v.questions.concat(extra.questions) };
+      } catch (e) {
+        if (!v.cards.length && !v.questions.length) throw e;   // nothing to salvage
+      }
     }
 
     job.chunks[d.id] = { cards: v.cards, questions: v.questions };

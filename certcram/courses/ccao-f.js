@@ -23,6 +23,7 @@ window.CERT_COURSES.push({
     vendor: "Anthropic",
     blurb: "Using Claude as a daily professional tool: prompting, judging outputs, handling context, and knowing what not to delegate.",
   },
+  weightsNote: "Five of these seven weights are from Anthropic's published exam guide (v1.0, July 2026). The remaining ~22% is split across the last two domains as an estimate — correct it in courses/ccao-f.js if you have the official figures, since these weights drive the whole plan.",
   exam: {
     questionCount: 60,
     timeLimitMin: 120,

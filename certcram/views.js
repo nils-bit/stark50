@@ -276,6 +276,7 @@ function showCertDetail(course) {
     ${r.untested.length ? `<div class="tiny" style="margin-top:0.6rem;color:var(--fail)">Never tested: ${esc(r.untested.join(", "))}. That part of the estimate is a guess.</div>` : ""}
 
     <div class="section-title" style="margin-top:1.5rem">Where the next hour goes<span class="st-line"></span></div>
+    ${course.weightsNote ? `<div class="tiny" style="color:var(--warn);margin:-0.4rem 0 0.8rem">⚠ ${esc(course.weightsNote)}</div>` : ""}
     ${rows.map(row => {
       const tag = domainTag(row, row.target);
       const share = row.priority / total;
