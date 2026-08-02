@@ -6,7 +6,7 @@
    gång per dygn. Appskalet hämtas därför nu från nätet först, med cachen som
    reserv när nätet är borta eller långsamt. */
 const CACHE = "stark50-v7";
-const BUILD = "2026-07-28";
+const BUILD = "2026-08-02";
 const NET_TIMEOUT = 3000; // ms innan vi ger upp och tar cachen — offline ska kännas snabbt
 const ASSETS = ["./", "./index.html", "./styles.css", "./app.js", "./manifest.webmanifest"];
 
@@ -18,8 +18,15 @@ self.addEventListener("install", e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
 });
 
+/* Rör bara våra egna cachar. caches är per origin, inte per scope: CERTCRAM
+   ligger under /certcram/ på samma adress, och ett filter utan prefix hade
+   raderat dess offline-cache varje gång den här versionen aktiverades. */
 self.addEventListener("activate", e => {
-  e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim()));
+  e.waitUntil(
+    caches.keys()
+      .then(keys => Promise.all(keys.filter(k => k.startsWith("stark50-") && k !== CACHE).map(k => caches.delete(k))))
+      .then(() => self.clients.claim())
+  );
 });
 
 /* Klick på en notis: fokusera appen om den redan är öppen, öppna den annars. */
